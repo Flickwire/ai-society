@@ -1,86 +1,124 @@
-# Deployment and operations plan
+# Local native deployment and operations
 
-## 1. Target machine
+## 1. Deployment target
 
-Personal gaming computer, AMD Radeon RX 7700 XT **12 GB** VRAM, 64 GB RAM. CPU and operating system remain to be confirmed. No employer inference service, infrastructure, tokens or development credentials may be used. Keep all project data and model downloads under user-controlled storage.
+One personally owned gaming computer: AMD Radeon RX 7700 XT (12 GB VRAM), 64 GB DRAM. Confirm exact CPU, OS and driver before choosing the inference binary. The application is local-only: no cloud hosting, public endpoints, browser frontend, containers or resident server processes beyond an optional local llama.cpp inference server. Remote inference endpoints are optional outbound HTTP services, not application hosting. Nothing may use employer infrastructure or credentials.
 
-## 2. Environment tiers
+## 2. Binaries and runtime layout
 
-**Local development:** Docker Compose for PostgreSQL + pgvector, Redis (once required), world-server, worker and web UI. Native `llama-server` on host for reliable AMD GPU access. Bind database and admin ports to localhost. Inference endpoint defaults to `http://127.0.0.1:<port>/v1` on the host; inside containers use a correctly scoped host-gateway address, not `localhost`. No public ingress.
+- `society-app`: native Bevy viewer, inspector, controls; hosts or connects in-process to the Rust simulation. Runs with a limited render FPS when local GPU inference is active.
+- `society-headless`: pure Rust simulation runner; no renderer, window, GPU graphics initialization or display requirement.
+- `society-bench`: benchmark harness for local/remote inference, action validity and virtual-time throughput.
+- `llama-server`: separately launched local inference service on loopback. Not a per-agent process.
+- SQLite save DB plus versioned event logs, snapshots, per-experiment directories and optional detailed traces.
 
-**Personal LAN:** same services; optional reverse proxy with TLS and authenticated viewer. Admin endpoint restricted to VPN or local network. Do not expose inference directly.
+Default directory layout should use platform-specific user data/config paths (e.g. via `directories` crate), with selectable portable mode for easy backups. Keep model weights in a separate configurable folder and never include them in Git.
 
-**Public read-only later:** deploy website/static assets separately and a hardened world-stream gateway, with API authentication, CORS allowlist, rate limits, service-level traffic caps and privacy review. Maintain local operator control and a kill switch.
+## 3. Install and build
 
-## 3. GPU runtime path
+Install stable Rust toolchain, matching native linker and relevant OS graphics dependencies; verify Bevy runs with the RX 7700 XT. Build `cargo build --release -p society-app -p society-headless -p society-bench`. Add native packaging only after a working release build; no Node, npm, pnpm, JS runtime, database server or Docker required.
 
-1. Verify OS and display driver, GPU enumeration and 12 GB VRAM. Check compatibility against the current AMD ROCm matrix.
-2. Install current compatible `llama.cpp` build with Vulkan backend for the simplest first run.
-3. Select Qwen3.5-9B Q4_K_M GGUF from a trusted publisher; verify model license, checksum and chat template. Never commit model weights.
-4. Configure `llama-server` for bounded 8K context, 1–2 slots, output token cap, localhost binding and logs. Reserve headroom for KV caches and desktop rendering. Begin with one slot and add a second only after measuring VRAM.
-5. Run 2K-prompt/300-output representative benchmark with 1/2/4 concurrent requests. Record prefill and aggregate output throughput, p50/p95 latency and peak VRAM.
-6. Compare ROCm/HIP build when supported on the selected OS. Keep whichever backend is faster and stable under a 1-hour load test.
-7. Benchmark Q5_K_M and smaller 4B candidates; retain a validated known-good Q4 baseline.
+Create first-run configuration file with no secrets and generate a world seed. SQLite migrations run on startup with pre-migration snapshot. Run `society-headless doctor` (to implement) to check DB permissions, free disk space, model endpoint capabilities, GPU memory and API config. Provide a safe `--offline` switch that forbids any remote inference traffic and requires local inference.
 
-AMD includes RX 7700 XT (`gfx1101`) in current ROCm compatibility information. Vulkan and ROCm both support quantised llama.cpp inference, but throughput and OS compatibility must be measured. Avoid relying on undocumented GPU architecture overrides.
+## 4. AMD inference setup
 
-## 4. Configuration and secrets
+1. Confirm OS/CPU, RX 7700 XT driver and available 12 GB VRAM.
+2. Choose a compatible llama.cpp build: Vulkan for simple cross-platform setup; compare ROCm/HIP using a supported AMD distribution/driver combination. Do not use unsupported architecture spoofing.
+3. Download a verified, appropriately licensed Qwen3.5-9B Q4_K_M GGUF from a trusted publisher; record hash and chat-template version.
+4. Start `llama-server` bound to `127.0.0.1` on a documented port with bounded 8K context, initially one inference slot, max completion length and timeouts. Avoid exposing it on LAN or public interfaces.
+5. Run representative 2,000-input/300-output action probes, track prefill/decode speed and peak VRAM. Try Q5_K_M and smaller 4B models. Test two slots only if VRAM headroom and latency justify it.
+6. Compare Vulkan and ROCm end-to-end under equal prompts/settings. Keep the known-good runtime/model as a rollback option.
 
-Use `.env.example` with placeholders only. Required values include `DATABASE_URL`, `WORLD_SEED`, `SIMULATION_MODE`, `MAX_VIRTUAL_SPEED`, `INFERENCE_BASE_URL`, `INFERENCE_MODEL`, `MAX_PARALLEL_REQUESTS`, `MAX_INPUT_TOKENS`, `MAX_OUTPUT_TOKENS`, `INFERENCE_DAILY_USD_CAP`, `LOG_RETENTION_DAYS`, `ADMIN_AUTH_SECRET` and optional `CLOUD_API_KEY`. Never commit `.env`, private database dumps, user uploads, API keys, logs containing sensitive content or GGUF weights.
+Allow either the app to spawn/manage a configured local llama-server child process (explicit user path, constrained flags, clean shutdown) or use an already-running endpoint. Do not download and execute binaries silently.
 
-Use personal commercial API credentials only when cloud fallback is explicitly enabled. Set a total spend cap at both application level and provider account level where supported. Make fallback fail closed when cost is unknown.
+## 5. Provider configuration
 
-## 5. Operations
+Use a versioned TOML file with named inference profiles and model roles, e.g.:
 
-- Startup order: database health -> migrations -> world state recovery -> scheduler -> web viewer. Start the inference server before enabling autonomous workers.
-- Shutdown: stop accepting new decisions, drain or persist pending events, record snapshot and world event offset, then stop services.
-- Health checks: DB ping, event lag, worker heartbeat, model endpoint readiness, GPU memory headroom, pending request count and budget remainder.
-- Alerts: memory over threshold, repeated invalid model output, inference timeout storm, event lag beyond configured maximum, failed snapshot, failed backups.
-- Recovery: restore last verified snapshot then replay append-only event log. Do not duplicate pending idempotent action IDs.
-- Backups: nightly compressed database dump and snapshots to a second disk; weekly off-device encrypted copies if the world becomes valuable. Test restore monthly.
-- Updates: pin runtime and model versions; stage migration against a copy; snapshot before deployment; keep previous image/build for rollback.
-- Model logs: redact sensitive visitor content, set retention policy, exclude secrets, never send private traces to telemetry by default.
+```toml
+[inference]
+active_profile = "local"
+offline = true
 
-## 6. Headless acceleration
+[inference.profiles.local]
+kind = "openai_compatible"
+base_url = "http://127.0.0.1:8080/v1"
+api_key_env = ""
 
-The simulation must run without 3D rendering. Modes: `realtime`, `capped`, `fast_forward`, and `replay`. In fast-forward, event scheduler advances to the next meaningful virtual event; LLM calls impose backpressure. Store both monotonic wall-clock timing and independent virtual event timestamps. If throughput falls below a capped multiplier, slow the virtual clock instead of dropping important decisions. Provide pause, resume and safe checkpointing.
+[inference.profiles.remote]
+kind = "openai_compatible"
+base_url = "https://YOUR-PROVIDER-ENDPOINT/v1"
+api_key_env = "AI_SOCIETY_REMOTE_API_KEY"
 
-## 7. Suggested performance and resource budgets
+[inference.roles.routine]
+profile = "local"
+model = "qwen-local"
+max_input_tokens = 2000
+max_output_tokens = 300
+max_concurrent = 1
 
-- GPU VRAM target: remain below ~10.5 GB peak during normal operation; tune per driver and desktop needs.
-- Initial context: 8,192 tokens per sequence, later benchmark 16K.
-- Resident count: 8, scale to 20 only after a stable baseline.
-- Agent decisions: target average 8 per agent per virtual hour; event spikes allowed within global bounds.
-- Database: start with 10–20 GB of dedicated SSD space and monitor growth.
-- Logs: keep 7–14 days detailed traces; compact historical metrics and event records deliberately, not implicitly.
-- Snapshot: every virtual day or fixed event count, plus before upgrades and experiment forks.
+[inference.roles.reflection]
+profile = "local"
+model = "qwen-local"
+max_input_tokens = 4000
+max_output_tokens = 700
+```
 
-## 8. Personal deployment checklist
+This is an illustrative schema, not an implemented parser. Add capability validation, aliases for models and explicit profile enablement. Remote use requires setting `offline=false` and an explicit profile change. Do not automatically send any prompt to a different trust boundary on failure. Optional roles can be individually remote, allowing local routine decisions and hosted reflections. Token/cost budgets and a provider fail-closed policy are mandatory. Read keys only from environment or OS credential store, never commit them.
 
-- [ ] Confirm OS/CPU and GPU drivers.
-- [ ] Verify no work accounts, endpoints, keys or code are configured.
-- [ ] Run chosen local inference model and record baseline throughput.
-- [ ] Provision persistent Docker volumes; verify backups and restore.
-- [ ] Configure local-only bind addresses and admin authentication.
-- [ ] Run schema migrations and seed the town.
-- [ ] Verify deterministic 24-hour no-model test.
-- [ ] Run 8-agent accelerated test with metric collection.
-- [ ] Test Ctrl+C/restart, crash recovery and replay checksums.
-- [ ] Only then consider LAN access or public spectator deployment.
+## 6. Modes of operation
 
-## 9. Failure modes
+Native UI: ordinary 3D viewer with selectable time multiplier and manual pause. Headless: `society-headless run --world WORLD --mode fast-forward --until-virtual-days 30` (planned CLI), with periodic progress logs and checkpoints. Replay: `society-app replay --experiment ID` or headless verification. CLI progress reports wall time, virtual time, acceleration, model throughput, queue backlog and estimated spending.
 
-| Failure | Desired behavior |
+Fast-forward advances to discrete events without rendering. Capped acceleration slows rather than dropping causal decisions when inference lags. Viewer FPS should be limited to 15–30 during inference-heavy sessions; consider stopping GUI entirely for overnight simulation.
+
+## 7. Storage and resilience
+
+SQLite WAL with one writer, transaction boundaries across state and event append, idempotent decision IDs, versioned migrations, regular WAL checkpoints and tested restore. Back up DB (using SQLite online backup API or safe checkpoint/backup flow), immutable event history and verified compressed snapshots. Keep last several snapshots and nightly off-device encrypted backups if the world becomes valuable. Do not copy a live DB file blindly and assume consistency.
+
+On startup, validate DB schema and latest snapshot hash, replay committed events, identify incomplete decisions, and either safely resume them or invalidate stale responses. On shutdown, stop new model requests, wait or cancel bounded pending work, commit checkpoint and terminate managed child processes. Crash recovery cannot duplicate trades.
+
+## 8. Performance/resource limits
+
+- Target GPU VRAM: leave roughly 1–2 GB headroom for the desktop/Bevy renderer; actual limit determined by measurements.
+- Initial local model: Qwen3.5-9B Q4 with 8K context, one slot; test parallelism rather than assume scaling.
+- Initial society: 8 agents averaging 8 decisions per virtual hour.
+- Limit open DB statements, task queues, per-agent wake-ups and prompt/conversation lengths.
+- Configure maximum output, request timeout and per-virtual-day budget by role.
+- Cap renderer FPS; provide reduced graphics mode and full headless mode.
+- Use disk retention policy for detailed traces, but never silently truncate canonical event history.
+
+## 9. Security
+
+Loopback-only inference by default; no inbound network listener required for the app. If remote inference is enabled, require HTTPS, explicit provider hostname, configured key and privacy notification in the UI. Never send API keys, entire DB contents or other agents' private memories as model prompt context. Validate untrusted dialogue and model responses; agents cannot execute OS commands, fetch arbitrary URLs or edit save files. Admin controls are local to the desktop app. Logs must redact credentials and allow configurable retention.
+
+## 10. Verification checklist
+
+- [ ] Confirm OS/CPU and compatible AMD driver/runtime.
+- [ ] Build Rust workspace and native app; no JS toolchain.
+- [ ] Start local inference on loopback; verify format/capabilities and VRAM.
+- [ ] Run deterministic no-inference headless test.
+- [ ] Run eight-agent inference endurance test; record actual acceleration.
+- [ ] Restart after clean and forced shutdown; verify state hashes and no duplicate events.
+- [ ] Replay stored outputs and compare checkpoints.
+- [ ] Switch from local to a test remote endpoint via TOML only, then back.
+- [ ] Test remote cost exhaustion and offline mode: no unexpected network calls.
+- [ ] Validate backup/restore and safe schema migration.
+
+## 11. Failure policies
+
+| Failure | Response |
 |---|---|
-| Model OOM | Retry with fewer slots/shorter context; no world corruption |
-| Invalid JSON/action | Reject with reason; limited retry, then safe fallback |
-| Model unavailable | Pause decisions or continue timed tasks; never fabricate choices |
-| Database disconnect | Stop committing events; queue safely or pause |
-| Concurrent conflicting purchase | Optimistic version check and atomic winner |
-| Replay mismatch | Halt and report first differing event/state hash |
-| Budget exhaustion | Disable paid provider; continue local-only or pause |
-| Browser disconnect | Headless world continues normally |
+ GPU OOM | Reduce slots/context or switch to smaller local model; no world mutation from failed inference |
+ Model timeout | Continue safe timed task or rest; bounded retry |
+ Invalid JSON/action | Reject with diagnostic; never write invalid state |
+ Conflicting actions | Stable serial commit, version/precondition check and explicit failure |
+ Remote outage | Fail closed by default; fallback only to explicitly permitted profile |
+ API budget hit | Stop paid inference and optionally use configured local model |
+ SQLite error | Pause authoritative writer and surface recoverable error |
+ Replay hash mismatch | Stop at first divergence and preserve diagnostics |
+ Viewer crash | Headless runner unaffected; saved state remains transactional |
 
-## 10. Optional future cloud deployment
+## 12. Distribution later
 
-If moving off the gaming PC, host world services and PostgreSQL on a small Linux VPS; use commercial open-weight inference APIs rather than renting a 24/7 GPU initially. Keep optional web frontend on static hosting. Use encrypted backup storage, HTTPS, per-agent inference budgeting and production monitoring. Never treat a consumer chatbot subscription as an unattended API allowance.
+Provide Windows and Linux release packages for a single native executable plus assets and a separate headless tool. Model weights and inference runtime remain optional, separately verified downloads due to size/licensing. No application updater or auto-execution of downloaded model runtimes without user opt-in.
