@@ -1,52 +1,49 @@
-# Autonomous Society Lab
+# AI Society — Native Rust Simulation
 
-Implementation and deployment blueprint for a persistent, accelerated, multi-agent virtual town. **Planning repository only**; no application runtime has been implemented yet.
+An offline-first autonomous society in a local native application, with a Bevy 3D viewer, renderer-free headless runner, accelerated virtual time, persistent memory and independently configurable inference providers.
 
-## Design targets
+**Status:** implementation/deployment plans only; no runtime has been written.
 
-- Eight independently motivated agents, expandable to 20.
-- Local-first inference on AMD Radeon RX 7700 XT (12 GB VRAM) and 64 GB system RAM.
-- Offline-compatible simulation; optionally route complex tasks to commercial APIs.
-- Three operating modes: real-time, capped acceleration, and maximum-speed discrete-event fast-forward.
-- Versioned world state, replay, snapshots, and experiment branches.
-- Private personal deployment, without employer infrastructure or credentials.
+## Architectural decisions
 
-## Documents
+- **Entire application in Rust.** No TypeScript, JavaScript runtime, Node.js services, browser frontend, or web deployment.
+- **Bevy native viewer** for exploration, inspection, time controls and playback.
+- **Pure Rust simulation core**, independent of Bevy rendering, wall-clock ticks and GPU resources.
+- **Separate headless executable** for maximum-speed experiments, benchmarks and unattended runs.
+- **SQLite/WAL** with append-only event history, snapshots, migrations and experiment branching.
+- **Swappable inference** through a Rust provider trait: local llama.cpp via OpenAI-compatible HTTP, or opt-in commercial APIs. Different models may serve routine, dialogue and reflection roles.
+- **Single-machine only** initially; no external-facing server, public observer or multiplayer requirement.
+- **Hardware target:** RX 7700 XT (12 GB VRAM), 64 GB RAM. OS/CPU to confirm.
 
-1. [Implementation plan](docs/IMPLEMENTATION.md): architecture, state, cognition, scheduler, milestones and tests.
-2. [Deployment and operations](docs/DEPLOYMENT.md): local AMD stack, environment, security, backups and recovery.
-3. [Cost and performance](docs/COSTS-AND-BENCHMARKS.md): throughput model, benchmark protocol, cloud alternatives and budget limits.
+## Workspace
 
-## Initial architecture
-
-```mermaid
-flowchart TD
-  Browser[React Three Fiber viewer] <-->|WebSocket| World[Colyseus authoritative world]
-  World <--> DB[(PostgreSQL + pgvector)]
-  World --> Events[Event scheduler]
-  Events --> Workers[Agent cognition workers]
-  Workers --> Memory[Memory retrieval and reflection]
-  Memory <--> DB
-  Workers --> Router[OpenAI-compatible inference adapter]
-  Router --> Local[llama.cpp on RX 7700 XT]
-  Router -. optional .-> Cloud[Commercial model API]
-  Workers -->|Validated action proposal| World
+```text
+crates/
+  society-domain/       # pure IDs, actions, state and rules
+  society-sim/          # virtual clock, deterministic event reducer
+  society-cognition/    # perception, goals, memory and reflection
+  society-inference/    # provider abstractions, transport, budgets
+  society-storage/      # SQLite and snapshot/event storage
+  society-view/         # Bevy 3D rendering and inspector
+  society-app/          # native graphical executable
+  society-headless/     # renderer-free CLI executable
+  society-bench/        # load and inference benchmarks
+assets/
+migrations/
+experiments/
+docs/
 ```
 
-## Project status
+## Plans
 
-Architecture and implementation plan drafted. No credentials, model weights, infrastructure, or application code are included.
+- [Implementation](docs/IMPLEMENTATION.md)
+- [Deployment and operations](docs/DEPLOYMENT.md)
+- [Cost and performance benchmarking](docs/COSTS-AND-BENCHMARKS.md)
 
-## Non-goals for v1
+## Core contract
 
-- Blockchain, tokens, real-money economies, unrestricted autonomous browsing/coding, and public signup.
-- Claiming agent consciousness or psychological realism.
-- Training or fine-tuning a foundation model.
+LLMs propose typed actions; the simulation validates and commits them. Renderer state is a projection of the simulation, not authoritative state. Virtual time advances through causally ordered events, with inference backpressure. Replay reuses recorded model outputs for deterministic reconstruction.
 
-## Principles
+## Not in v1
 
-1. The **world server** is authoritative; language models submit proposals, never database mutations.
-2. Event-time ordering is deterministic and auditable; inference outputs are recorded for exact replay.
-3. Agents perceive only allowed local observations and their own memories.
-4. All external AI providers are personal accounts, expressly configured and budget-capped.
-5. A headless accelerated simulation must run without the browser or 3D renderer.
+Public hosting, JavaScript stack, networked multiplayer, real-money economy, blockchain, unrestricted agent shell/network access, foundation-model training, and claims of guaranteed emergence or consciousness.
