@@ -1,130 +1,93 @@
-# Detailed implementation plan
+# Implementation plan — fully native Rust
 
-## 1. Scope and acceptance criteria
+## 1. Definition of done
 
-Build an eight-resident persistent society in a small town containing housing, a market, workshop, public square, garden, forest, shared well, and 12–20 interactive locations. Residents can move, rest, eat, forage, craft, trade, communicate, form relationships, remember experiences, establish goals, and reflect on prior behaviour. Visitors initially observe only. 3D display is a read-only projection of authoritative simulation state.
+Eight autonomous residents inhabit a persistent village with 12–20 locations, homes, market, workshop, shared resources and wilderness. They move, rest, eat, forage, craft, trade, converse, remember, form relationships and pursue evolving goals. A native Bevy application displays and inspects the town; a separate headless executable runs identical rules without loading graphics. An unattended seven-virtual-day run must survive restarts, preserve transaction invariants, record reasoning traces and support exact replay from stored model outputs.
 
-Success at v1: eight residents survive an unattended seven-day simulated run; at least one multi-step goal and one validated trade can complete; restart preserves state; replay reconstructs the same world when recorded decisions are reused; local inference hard-limits concurrency; no model output can bypass action validation. Measure rather than promise emergent social behaviour.
+## 2. Project structure and libraries
 
-## 2. Monorepo and stack
+Rust Cargo workspace, pinned stable toolchain and Cargo.lock. Bevy 0.20 (verify compatibility at implementation), Tokio, Reqwest, Serde, schema generation/validation, SQLx SQLite, clap, tracing, metrics, proptest, criterion and cargo-deny/audit. Keep simulation-domain crates free of Bevy, HTTP, Tokio and GPU dependencies. Bevy ECS is used for visual entities; authoritative simulation uses deterministic serialisable domain structures. Share stable IDs and typed projection events between them.
 
-Use TypeScript strict mode, pnpm workspaces, Turborepo, Node.js LTS, Zod, Vitest, Playwright, React, React Three Fiber, Colyseus, PostgreSQL/pgvector, Drizzle ORM, Redis/BullMQ (introduce after prototype), OpenTelemetry and structured JSON logs. llama.cpp exposes a local OpenAI-compatible API. Containerise all services except native GPU inference initially.
+| Crate | Responsibilities |
+|---|---|
+| society-domain | IDs, events, action schemas, world entities, rule versioning |
+| society-sim | Event priority queue, virtual time, deterministic state transitions |
+| society-cognition | Perception assembly, memory, goals, wake-up policy, reflection |
+| society-inference | Provider trait, adapters, routing, usage/cost limits |
+| society-storage | SQLite migrations, transactions, snapshots, replay |
+| society-view | Bevy 3D scene, interpolation, inspector and timeline |
+| society-app | Native app composition, interactive controls |
+| society-headless | No graphics initialization; fast-forward CLI |
+| society-bench | GPU throughput and world load tests |
 
-```text
-apps/
-  web/                 # Three.js viewer, playback controls, observer UI
-  world-server/        # Colyseus rooms, commands, authoritative state
-  agent-worker/        # inference, reflection, perception, action plans
-  admin/               # traces, budgets, snapshots, experiment controls
-packages/
-  domain/              # branded IDs, event/action types, Zod schemas
-  simulation/          # deterministic rules and virtual-time clock
-  cognition/           # prompt construction, decision policy, routing
-  memory/              # episodic/social/semantic retrieval and decay
-  inference/           # local/cloud adapters and token accounting
-  experiments/         # snapshots, branches, replay, metrics
-infra/                 # Compose, migrations, config examples
-docs/
-```
+## 3. World model and authoritative rules
 
-## 3. Authoritative world model
+Use a graph of places, links and objects, with residents holding location/transit, needs, inventory, money (integer minor units), skills, current activity, relationships, goals and identity. Define actions such as Move, Observe, Speak, Eat, Rest, Forage, Craft, Work, OfferTrade, AcceptTrade, StartProject, ContinueProject and CancelProject. Actions carry typed parameters, expected world version, stable idempotency ID and preconditions. Only the single simulation writer applies changes, in a transaction with event append and version increment.
 
-Represent the world as a graph of locations, traversable edges and interactive objects. Each actor has location, optional transit, inventory, money, need levels, skills, current task, relationships, a version, and a stable identity. All movements and object interactions become append-only domain events. Use a transaction to atomically validate preconditions, apply effects, increment versions and append events.
+All simulation consequences are deterministic given versioned rules, input action and seeded PRNG. Needs advance analytically over elapsed virtual time; travel and work schedule completion events. Precompute paths or path costs. Do not perform per-frame physics updates in headless mode. Failed purchases and other conflicts return explicit feedback events instead of corrupting balances.
 
-Suggested tables: `worlds`, `world_clock`, `agents`, `agent_state`, `locations`, `edges`, `objects`, `inventories`, `inventory_items`, `resources`, `relationships`, `goals`, `tasks`, `promises`, `memories`, `beliefs`, `world_events`, `decision_requests`, `decision_results`, `simulation_snapshots`, `experiment_branches`, `model_usage`.
+## 4. Virtual-time scheduler
 
-Use integer minor units for currency and integer item quantities. Stable IDs and optimistic state versions prevent duplicated purchases. Seedable PRNG governs deterministic world effects; store seeds and rule versions. UTC timestamps describe real operations, while an integer `virtual_time_ms` orders simulated events. Never use wall-clock `Date.now()` in game-rule evaluation.
-
-## 4. Simulation engine and acceleration
-
-Implement a priority queue ordered by `(virtual_time_ms, priority, sequence_id)`. The engine advances directly to the next event. Deterministic periodic needs accrue analytically over elapsed virtual time, rather than performing one update per rendered frame. Timed actions have start, finish, interruption and cancellation events. Physics/paths can be precomputed as travel durations for headless simulation; the renderer interpolates from published positions.
+Priority queue sorted by (virtual_time_tick, priority, sequence_id). Jump directly to the next meaningful event; quiet hours need not simulate every frame. Maintain independent monotonic wall duration, UTC operation timestamp and integer virtual time. Agent reasoning is asynchronous: a versioned perception is placed in a bounded worker queue; the simulation waits when causal ordering requires a decision. Outdated proposals are rejected and reconsidered. Parallel inference never commits simultaneous mutations directly.
 
 Modes:
-- **Real-time:** virtual clock follows monotonic wall time.
-- **Capped:** target multiplier (e.g. 3x or 5x), applying backpressure when inference lags.
-- **Fast-forward:** process next event as soon as required model outputs become available; no promised fixed multiplier.
-- **Replay:** use recorded model decisions and random outcomes, never issue fresh inference; allow seek from snapshots.
 
-Determinism policy: all actions due at a virtual timestamp resolve in stable order; observations are built against a versioned state. LLM decisions can execute only if preconditions remain valid. Failed actions become feedback events. Do not let wall-clock latency alter simulation chronology. A queue item carries its virtual causality timestamp and snapshot version.
+- **realtime** — virtual clock follows wall time.
+- **capped** — attempt a configurable multiplier; slow automatically when the model is behind.
+- **fast-forward** — run as fast as pending events and model inference allow.
+- **replay** — no inference calls; use recorded responses, random outcomes and periodic snapshots.
 
-## 5. Cognition policy
+Store event/state hashes to identify replay divergence. Same model prompts do not imply deterministic fresh generations; exact reproduction requires stored outputs.
 
-The agent scheduler reacts to: completed action, nearby speech/arrival, environmental hazard, unmet need threshold, goal deadline, periodic curiosity and sleep/wake transitions. Each agent has a minimum think interval, interrupt priority, maximum prompt and completion tokens, per-virtual-day call budget, and real-dollar budget. For ordinary passive travel or work, continue a multi-minute action without new inference.
+## 5. Inference isolation and routing
 
-Build prompts from: immutable identity card; concise rules; current local observation; needs; available tool actions; current commitments; top-k relevant memories; and recent causal events. Keep ordinary prompts around 1,000–2,000 tokens and responses under 300 tokens initially. Prefer structured output like `{actions:[{kind,args,reason}], next_check_virtual_ms}` validated with Zod. Reject unknown actions, invalid targets, impossible inventory transfers, overlong outputs and world-state contradictions. On timeout, continue ongoing action or use deterministic rest behaviour.
+Rust trait:
 
-Initial model tests: Qwen3.5-9B Q4_K_M vs Q5_K_M, and a small 4B contender. Run both against identical scenario fixtures. Reserve a hosted stronger model for optional complicated planning/reflection; never depend on it for core simulation operation.
+```rust
+#[async_trait::async_trait]
+pub trait InferenceProvider: Send + Sync {
+    async fn generate(&self, req: InferenceRequest)
+        -> Result<InferenceResponse, InferenceError>;
+    fn capabilities(&self) -> ProviderCapabilities;
+}
+```
 
-## 6. Memory and identity
+Transport implementations: OpenAI-compatible JSON HTTP for llama.cpp and supported commercial endpoints; add a dedicated adapter only when unavoidable. Requests carry role (routine/dialogue/planning/reflection/embedding), messages, supported structured-output schema, token caps, timeout, trace ID. Responses carry provider/model, content, token usage, cache usage if reported, latency and billed/estimated cost. Capability negotiation checks JSON schema/tool support, context length, streaming, reasoning tokens and caching; never assume universal API equivalence.
 
-Distinguish working context, episodic memories, stable semantic facts, subjective social beliefs, commitments and immutable baseline identity. Memories carry source event, observer agent, virtual timestamp, importance, confidence, retrieval count, optional embedding, decay parameters and supersession links. Retrieval scores combine semantic similarity, recency, salience, relationship and unfinished-task relevance. Maintain strict per-agent visibility: agent A cannot inspect B's private records.
+Configure per-role ordered providers/models. Default **local only**, llama.cpp on loopback, with no remote keys. Remote use is explicit opt-in, with a separate allowlist, daily/monthly budgets and fail-closed behavior. Route routine actions to quantised 4B–9B models; optionally use larger hosted models for planning/reflection. A provider switch must require configuration only, not world-rule changes. Retain an inference compatibility test suite against every configured endpoint.
 
-Consolidate during scheduled rest: summarize repeated experiences, reinforce useful facts, evaluate unfinished goals, record tentative preference changes and prune low-value episodes. Keep a locked baseline personality; any evolving traits are versioned and reversible. Preserve raw event records separately, so lossy memory pruning does not erase the audit trail.
+## 6. Agent autonomy
 
-## 7. Social and economic simulation
+Wake triggers: completed task, nearby speech, arriving visitor/agent, need threshold, goal deadline, changed resources, scheduled curiosity and nightly reflection. Every agent has a minimum think interval, next review time, priority, bounded token allowance and activity continuation. A walk or repetitive work activity should not spend tokens every frame. A normal decision returns 1–3 typed actions and reasoning, ideally from a 1–2K token perception and <=300 output tokens. Strictly validate actions; on malformed output or timeout, optionally retry once then continue safe existing activity or rest.
 
-Give each agent an individual worldview and relationship ledger, not one universal friendship score. Dialogue is audible within a radius or shared room. Messages are events; an agent may listen, respond, ignore or leave. Cap back-and-forth exchanges to prevent infinite token-consuming conversations. Trade follows `offer -> accept -> atomic transfer`, with expiry and cancellation. Scarcity should be tunable per experiment, without hard-coding social outcomes. No real money in v1.
+Memory: short working context, episodic experiences, semantic facts, subjective relationships, promises, goals, baseline personality and bounded amendments. Persist provenance, owner, virtual timestamp, salience, confidence, recall frequency and decay. Start retrieval with SQLite FTS5 and structured filters; evaluate local embedding/vector search later using measured retrieval quality. Agents only see their own memories and permitted world observations. During rest, a separate bounded reflection updates summaries, beliefs and goals without deleting protected original identity.
 
-## 8. Observability and experiment design
+## 7. Native Bevy GUI
 
-Log decision ID, virtual time, prompt template revision, provider/model, input/output/cached tokens, wall latency, cost, selected actions, validation outcomes and snapshot versions. Store redacted prompt/response traces locally with configurable retention. Admin UI shows individual timelines, relationships, goals, inventory, memory retrievals, token budgets, heatmaps and virtual-time lag.
+Stylised low-poly town, agent animation and interpolated paths, day/night, selected-resident inspector, event history, reason/action validity, memory and relationships view, profiler, inference settings, pause/speed/fast-forward, snapshots and replay timeline. Keep render FPS separately configurable (e.g. 15/30/60) because it competes with local inference for RX 7700 XT GPU capacity. The visual ECS is a read model only; closing the window does not corrupt simulation state. Headless CLI never loads Bevy render plugins or requests a graphics device.
 
-Experiments require immutable starting snapshot, simulation rules hash, agent prompt version, model versions, PRNG seed and model outputs. A fresh run with the same prompt is not guaranteed deterministic; exact replay reuses recorded outputs. Compare model cohorts on action validity, goals completed, resource inequality, reciprocal interactions, repetition, errors and cost per simulated day. Make behavioral claims cautiously.
+## 8. Persistence and experiments
 
-## 9. Safety and access control
+SQLite WAL, one writer, read-only inspector connection, migrations and durable transactions. Tables for world metadata, entity state, inventories, goals, relationships, memories, decision traces, event log, snapshots and experiment branches. Store integer virtual ticks and monotonic sequence. Snapshots daily or by event count; compressed and verified, with append-only events after each snapshot. Branch by snapshot + rules/config/seed/model identity. Exact replay reads captured decisions instead of rerunning the LLM. Avoid storing secrets or unnecessary visitor personal content in traces.
 
-Treat agent conversation, visitor messages and memories as untrusted prompt content. Tool access is a closed allowlist; structured actions may only address in-world objects and identities. No shell, network browsing, external messaging, purchasing or unrestricted file writes in v1. If later adding creative code tools, execute in a disposable sandbox with resource/time/network limits and explicit approval gates for publication. Never expose model API keys or internal prompts to browser clients. Apply auth to the admin panel; rate-limit public interactions if opened to visitors.
+## 9. Performance engineering
 
-## 10. Phased delivery backlog
+Baseline before tuning: 8 agents × 8 decisions/virtual hour × 2K input/300 output tokens. Keep context around 8K and start with 1 inference slot on the RX 7700 XT; benchmark 2 and 4 slots and Q4/Q5 before increasing. One model server is shared among all residents. Avoid full world clones per perception, use compact IDs, spatial indexes and cached path costs, batch bounded database writes, and separate blocking IO from the world reducer. Bounded queues and backpressure are mandatory. Profile actual end-to-end throughput, not just LLM decode tokens/sec.
 
-### Phase 0 — Foundation (2–4 evenings)
-- Initialise repo, license decision, pnpm workspace, TypeScript strict, lint/format, CI, Docker Compose, migrations, seed fixtures.
-- Define architecture decision records (ADRs), event/action schemas and measurable budgets.
-- Exit: reproducible `pnpm test`, database migration and headless process from clean checkout.
+## 10. Development milestones
 
-### Phase 1 — Deterministic town (week 1–2)
-- Map graph, 8 seeded residents, needs, time, inventories, locations, timed move/rest/eat/forage actions.
-- Implement transactional event store, snapshot restore and reproducible no-LLM fast-forward.
-- Exit: 30 virtual days in headless deterministic simulation; no negative inventories or duplicate items.
+1. **Foundation (2–4 evenings):** Cargo workspace, CI, strict lint, domain actions/events, schema migrations, minimal headless binary. Gate: clean build/test on target OS; no JS toolchain.
+2. **Simulation (weeks 1–2):** seeded town, eight residents, needs, navigation, resources, work/rest/eat actions, event store, snapshots. Gate: 30 deterministic virtual days with conservation/property tests.
+3. **Inference (week 3):** llama.cpp local endpoint, Rust adapter, schema-validation, event wake-ups, budget/fallback behavior. Gate: 24 simulated hours; malformed outputs cannot alter world; model benchmarks recorded.
+4. **Society (weeks 4–5):** persistent memory, FTS, conversation, goals, relationships, trades, reflection. Gate: after restart an agent recalls a person, completes a multi-step task and atomic trade; no private-memory leaks.
+5. **Bevy app (week 6):** town renderer, controls, inspector, replay. Gate: GUI and headless share identical state transitions; GUI restart safe.
+6. **Optimization (week 7):** adaptive acceleration, profiling, WAL recovery, queue stress, memory and VRAM limits. Gate: seven virtual days unattended with zero integrity failures and measured acceleration.
+7. **Providers/experiments (week 8):** opt-in remote adapter, model-role configuration, hard caps, experiment branches and comparison metrics. Gate: switch local/remote via config only; budget exhaustion fails closed; replay checksums match.
 
-### Phase 2 — Inference and scheduler (week 3)
-- llama.cpp adapter, structured output validation, event wake-ups, per-agent concurrency and deadlines.
-- Build fixed scenario corpus and cost/latency traces; fallback on model failure.
-- Exit: 24-hour simulated run with no unhandled tool or schema exceptions; benchmark 1/2/4 concurrent requests.
+## 11. Tests and security
 
-### Phase 3 — Memory, goals and relationships (week 4–5)
-- Episodic memory, semantic retrieval, subjective relationship records, commitments, reflection.
-- Add dialogue hearing, exchange protocols and multi-step task planning.
-- Exit: agents remember relevant events after restart; complete a trade and multi-step goal; privacy tests pass.
+Unit/proptest: time integration, inventory/currency conservation, event monotonicity, bounded needs and queues, deterministic PRNG. Integration: DB crash/restart, concurrent conflicting purchases, late model responses, malformed JSON, provider outage, snapshot restoration. Replay: checkpoint hashes identical when recorded inference is used. Security: prompt injection through dialogue/memory never escalates to shell, filesystem, network or secret access. No unrestricted agent tools in v1. CI runs fmt, clippy, test, audit and release build; native packaging after endurance gates.
 
-### Phase 4 — Viewer and operator experience (week 6)
-- Browser 3D map, character animations, selection inspector, live activity feed, clock controls.
-- Admin controls for pause/resume, speed cap, snapshot, experiment branch and budget changes.
-- Exit: client reconnects cleanly; headless simulation does not require viewer.
+## 12. Unresolved preferences
 
-### Phase 5 — Performance and reliability (week 7)
-- Profile GPU inference, prompt prefill, queue lag, memory retrieval and database writes.
-- Implement adaptive backpressure, compact snapshots, retention, service restart and backups.
-- Exit: seven consecutive virtual days with 8 agents, zero data corruption, bounded queues and no budget overruns.
-
-### Phase 6 — Experiments and packaging (week 8)
-- A/B scenarios with common initial snapshot; metrics exports and comparison dashboard.
-- Prepare private local deployment docs and optional hosted fallback switch.
-- Exit: same recorded run replays identically; fresh branch can vary scarcity/model settings.
-
-## 11. Test strategy
-
-- Unit: needs integration across elapsed time, deterministic PRNG, action schema, goals, decay and ranking.
-- Property-based: conservation of items/currency, unique ownership, no negative inventory, bounded needs, event monotonicity.
-- Integration: transactions and conflict resolution, scheduler retries, LLM malformed output, database crash/restart.
-- Replay: state hashes at checkpoints equal when using recorded decisions and seeds.
-- Load: 8, then 20 agents; simulated month; stress conversations; backpressure and OOM behavior.
-- Security: prompt-injection fixture, cross-agent memory leak, unauthorized admin requests, malicious visitor content.
-
-## 12. Decisions to confirm before coding
-
-1. Host OS (Windows, Ubuntu, Bazzite or other) and CPU model.
-2. Fully offline requirement versus optional paid reflection.
-3. Public observers or local-only v1.
-4. Visual style and whether assets may use permissively licensed packs.
-5. License for code if the GitHub repository may eventually become public.
+CPU and OS, art style, licensing, resident identities, and whether optional remote model providers may process private interactions. These do not block the core architecture.
