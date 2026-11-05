@@ -1,76 +1,75 @@
-# Cost, acceleration and measurement model
+# Local performance, acceleration and inference costs
 
-## Assumptions
+## 1. Hardware assumptions
 
-8 agents × 8 decisions per virtual hour = 64 decisions/virtual hour. Each decision averages 2,000 input tokens plus 300 generated tokens. A virtual day therefore requires 1,536 decisions, 3.072 million input tokens and 460,800 generated tokens. This excludes reflection, media and tool use.
+AMD Radeon RX 7700 XT = **12 GB VRAM**, up to 432 GB/s memory bandwidth, plus 64 GB system RAM. Exact OS, CPU and power measurements are pending. Shared DRAM is not equivalent to GPU VRAM. Bevy rendering and local inference compete for GPU memory and compute; headless mode removes the renderer load.
 
-The RX 7700 XT has 12 GB VRAM and up to 432 GB/s physical memory bandwidth, not 16 GB VRAM. 64 GB DRAM helps for simulation and offloading but does not have VRAM-like GPU throughput.
+## 2. Baseline society workload
 
-## Acceleration formula
+8 residents × 8 decisions per virtual hour = 64 requests per virtual hour. Each prompt averages 2,000 input tokens and each decision 300 output tokens. Therefore one virtual day needs 1,536 model calls, 3.072M input and 460,800 output tokens. Reflection, embedding, creative tasks and retries add usage. Token counts must be measured from actual requests after implementation.
 
-For `N` agents, `d` decisions per simulated agent-hour, prompt `p`, output `o`, aggregate prefill rate `P`, aggregate generation rate `G`:
+## 3. Speed model
 
-`real_seconds_per_sim_hour = N*d*(p/P + o/G + per_request_overhead_seconds)`
+With N residents, d decisions per simulated resident-hour, p input tokens per request, o output tokens, aggregate prompt rate P and aggregate output rate G:
 
-`maximum_acceleration = 3600 / real_seconds_per_sim_hour`
+`seconds_per_virtual_hour ≈ N*d*(p/P + o/G + request_overhead)`
 
-These simplified rates apply to a serialized workload, ignore retrieval/simulation overhead and cannot predict parallel serving automatically. Measure aggregate service throughput under realistic concurrency and use the observed end-to-end response times for capacity planning.
+`maximum_virtual_speed = 3600/seconds_per_virtual_hour`
 
-| Scenario | Prompt tok/s | Output tok/s | Estimated acceleration (zero extra overhead) |
+This is a serial-style planning estimate; concurrent serving needs measured end-to-end aggregate throughput. Do not multiply single-request tok/s by the number of slots.
+
+| Assumed scenario | Prompt tok/s | Output tok/s | Upper bound virtual speed without overhead |
 |---|---:|---:|---:|
-| Conservative | 400 | 30 | 3.75x |
-| Middle | 600 | 40 | 5.54x |
-| Optimistic | 900 | 55 | 7.34x |
+ Conservative | 400 | 30 | 3.75× |
+ Middle | 600 | 40 | 5.54× |
+ Optimistic | 900 | 55 | 7.34× |
 
-At half the decision frequency, the theoretical multiplier doubles. Context caching can reduce prefill cost and latency, but do not count on it before benchmarking. Conversations can create bursts far above the average.
+At four decisions per agent per virtual hour, idealised throughput doubles. Accelerated time does not make inference free: more simulated days per wall hour means more model calls per wall hour. Headless operation primarily removes rendering overhead and simplifies the event clock.
 
-## Benchmark protocol
+## 4. Model and backend matrix
 
-1. Record exact GPU, CPU, OS, driver, runtime commit, backend, GGUF source hash, quantisation, context, slot count and batch settings.
-2. Use 50 representative observations and action schemas; each request ~2K input and capped 300 output tokens.
-3. Warm model and run serial for 100 requests. Track first-token latency, total duration, effective prompt and completion tokens/s, token counts and valid-action rate.
-4. Repeat with 2 and 4 concurrent sequences. Track total throughput, per-agent p95 latency and GPU memory; reduce concurrency if OOM or latency becomes unacceptable.
-5. Repeat at 8K and 16K max contexts, and with the 4B and 9B candidate models.
-6. Run a one-hour real-time endurance test and a one-day virtual fast-forward test; compute `virtual_elapsed / wall_elapsed` using actual event logs.
-7. Include simulated conversations, multiple simultaneous market actions, and idle/sleep cycles; verify state invariants.
-8. Compare Vulkan and ROCm/HIP on same dataset and settings. Publish local benchmark JSON into `benchmarks/` only after scrubbing personal content.
+Candidates: Qwen3.5-9B Q4_K_M baseline, Q5_K_M quality alternative, a suitable 4B model for cheap routine decisions, and 12–14B Q4 only if VRAM permits context/cache headroom. Do not plan 27B+ Q4 fully in 12 GB; CPU offloading may be much slower. Test llama.cpp Vulkan and ROCm/HIP on the actual OS. Use one loaded inference server across all agents, not eight copies. Start one slot at 8K context, then benchmark two and four slots. Quantisation and model licenses must be verified per downloaded artifact.
 
-## Cloud inference reference estimate
+## 5. Mandatory benchmark protocol
 
-At the baseline 30 days of virtual time each month: 46,080 decisions, 92.16M input, 13.824M output tokens. Indicative November 2026 provider list-price calculations (USD, uncached, without reflection or fees):
+1. Record OS, CPU, driver, GPU, llama.cpp revision, backend, model SHA, quantisation, context, slot count, batch and KV cache settings.
+2. Create 50 representative world-observation fixtures with 2K input tokens and <=300 output tokens, including structured action schema.
+3. Warm up, then run at least 100 serial requests; measure prompt processing, output throughput, end-to-end p50/p95, action validity, GPU memory and watts.
+4. Repeat with 2 and 4 concurrent requests. Calculate aggregate completed decisions/min, not sum of isolated speed readings.
+5. Compare 4B/9B Q4/Q5, Vulkan vs ROCm, GUI at 30 FPS and truly headless.
+6. Run 1 real hour of full eight-agent activity and compute actual virtual_elapsed/wall_elapsed, retries and event backlog.
+7. Run 7 virtual days with one high-conversation scenario and one quiet/idle scenario; test backpressure and GPU OOM.
+8. Export anonymised benchmark JSON; preserve model/runtime versions for comparisons.
 
-| Model | Input $/M | Output $/M | Cost for 30 virtual days |
+## 6. Cost calculation: local and remote
+
+If the world completes 30 virtual days, that entails 46,080 routine decisions and roughly 92.16M input plus 13.824M output tokens. Indicative November 2026 per-million-token prices, subject to rechecking:
+
+| Provider/model | Input USD/M | Output USD/M | Baseline 30 virtual days |
 |---|---:|---:|---:|
-| Qwen3.5-9B (DeepInfra) | 0.10 | 0.15 | $11.29 |
-| Qwen3.5-35B-A3B (DeepInfra) | 0.14 | 1.00 | $26.73 |
-| Qwen3-235B-A22B-Instruct-2507 (DeepInfra) | 0.09 | 0.55 | $15.90 |
-| GPT-6.1 Sol (OpenAI) | 2.00 | 10.00 | $322.56 |
+ DeepInfra Qwen3.5-9B | 0.10 | 0.15 | $11.29 |
+ DeepInfra Qwen3.5-35B-A3B | 0.14 | 1.00 | $26.73 |
+ DeepInfra Qwen3-235B-A22B-Instruct-2507 | 0.09 | 0.55 | $15.90 |
+ OpenAI GPT-6.1 Sol | 2.00 | 10.00 | $322.56 |
 
-Note: the 235B price above is derived from the provider's published list price; provider availability and price may change. These costs depend on **simulated days completed**, not wall-clock runtime. Faster simulation consumes a month's equivalent of tokens faster in real time.
+Prices exclude caching, extra reasoning, model-specific billing rules, web/media tools and provider changes. A mixture of local routine and remote reflection should be metered by role. The same 30 virtual days cost roughly the same number of tokens whether generated in one fast-forward weekend or a calendar month.
 
-## Electricity
+Local GPU inference has no per-token API bill but uses electricity. At an assumed £0.25/kWh and whole-system active draw of 250–450 W: 8h costs £0.50–£0.90; continuous 30 days costs £45–£81. Measure at the plug; actual power varies significantly. Hosted inference may be economically better for continuous operation, while local inference offers privacy and unmetered exploration.
 
-For illustration only, at £0.25/kWh:
+## 7. Operational targets
 
-| Whole-system draw | 8 hours | 24 hours | Continuous 30-day month |
-|---|---:|---:|---:|
-| 250 W | £0.50 | £1.50 | £45 |
-| 450 W | £0.90 | £2.70 | £81 |
+- Track percent time waiting on inference, input/output/cache tokens and actual cost.
+- Measure event rate, state hash consistency, queue depth, memory and GPU peak use.
+- Hard remote daily/monthly caps; app-side cap plus provider-side account limit.
+- Benchmark model quality: valid structured action %, repeated-action loops, goals completed, conversational coherence, memory retrieval, tasks per 1M tokens.
+- Select the smallest sufficient model for routine tasks; move only complex planning/reflection to expensive profiles.
 
-Measure actual plug-level power during inference, not just GPU board power. Hosted APIs may cost less than electricity if running continuously; local inference gives privacy, predictable marginal token cost and unmetered experimentation.
+## 8. Primary references
 
-## Budget limits
-
-- Local mode: no token billing; monitor electricity, latency and thermal headroom.
-- Hybrid mode: commercial fallback disabled by default; explicit per-day/per-month caps, and a fail-closed option.
-- If public visitors are eventually enabled, charge inference against visitor interaction and agent budgets; rate-limit conversations and prevent users forcing endless loops.
-- Maintain dashboards for tokens per virtual day, cost per successful action, percent rejected actions, inference wait share and actual acceleration multiplier.
-
-## Sources to recheck before deployment
-
-- AMD RX 7700 XT specifications: https://www.amd.com/en/products/graphics/desktops/radeon/7000-series/amd-radeon-rx-7700-xt.html
-- AMD ROCm GPU support: https://rocm.docs.amd.com/projects/install-on-linux/en/docs-7.2.2/reference/system-requirements.html
+- AMD RX 7700 XT specs: https://www.amd.com/en/products/graphics/desktops/radeon/7000-series/amd-radeon-rx-7700-xt.html
+- AMD ROCm compatibility: https://rocm.docs.amd.com/projects/install-on-linux/en/docs-7.2.2/reference/system-requirements.html
 - AMD llama.cpp guide: https://rocm.docs.amd.com/projects/ai-ecosystem/en/latest/inference/llamacpp.html
-- llama.cpp project: https://github.com/ggml-org/llama.cpp
-- DeepInfra prices: https://deepinfra.com/pricing
-- OpenAI model rates: https://developers.openai.com/api/docs/models
+- llama.cpp: https://github.com/ggml-org/llama.cpp
+- Bevy: https://bevy.org/
+- DeepInfra pricing: https://deepinfra.com/pricing
+- OpenAI API pricing: https://developers.openai.com/api/docs/pricing
