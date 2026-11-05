@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+.turbo/
+coverage/
+*.gguf
+*.safetensors
+*.sqlite
+*.db
+*.log
+logs/
+backups/
+uploads/
+snapshots/
+private/
