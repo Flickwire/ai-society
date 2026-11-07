@@ -103,8 +103,9 @@ boundary, even when the prompt tells the model those same rules.
   token environment variable. Non-loopback URLs require HTTPS; never put a key
   directly in a URL or commit credentials.
 - With `--inference`, provider errors and rejected actions stop the run; never
-  substitute deterministic actions. Truncated provider responses receive a
-  bounded retry with a larger output-token budget.
+  substitute deterministic actions. Invalid model decisions and rejected
+  actions receive up to two inference correction attempts. Truncated provider
+  responses receive a bounded retry with a larger output-token budget.
 - Residents see only their own strongest recent memories and personal attitudes
   in the decision prompt. Witness memories include uncertain interpretations;
   never treat these as canonical event history or expose another resident's
@@ -117,9 +118,11 @@ boundary, even when the prompt tells the model those same rules.
   event memories. Note CRUD is expressed as typed actions; notes are private
   and exposed only by the bounded `notes` perception query.
 - Inference perception always starts with position, immediate needs, and
-  individual traits. Every other state detail must be requested through the
-  bounded query allowlist. Keep queries read-only, cap their result counts, and
-  keep the follow-up-round and combined-context limits in place.
+  individual traits, nearby object IDs/distances/stock, and the interaction
+  radii. Other state details must be requested through the bounded query
+  allowlist. Queries must be structured objects; natural-language questions
+  are not understood and should trigger an inference correction. Deduplicate
+  repeated queries and keep the follow-up-round and combined-context limits.
 - Storyteller requests use committed action summaries and before/after snapshots;
   do not pass private memories or attitudes to this observer, feed summaries
   back into resident decisions, or let narration mutate authoritative state.

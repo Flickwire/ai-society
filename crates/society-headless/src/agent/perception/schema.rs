@@ -21,7 +21,8 @@ pub(super) enum InferenceTurn {
 #[serde(untagged)]
 pub(super) enum QueryInput {
     Structured(StateQuestion),
-    NaturalLanguage(String),
+    /// Preserve malformed query input so the agent can be prompted to correct it.
+    Other(serde_json::Value),
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -121,98 +122,38 @@ fn default_place_limit() -> u8 {
     4
 }
 
-pub(super) fn normalize_questions(questions: &mut Vec<QueryInput>) -> Vec<StateQuestion> {
+pub(super) fn normalize_questions(
+    questions: &mut Vec<QueryInput>,
+) -> Result<Vec<StateQuestion>, String> {
     let mut seen = HashSet::new();
-    questions
-        .drain(..)
-        .filter_map(|input| {
-            let mut question = match input {
-                QueryInput::Structured(question) => question,
-                QueryInput::NaturalLanguage(text) => natural_language_query(&text)?,
-            };
-            normalize_question(&mut question);
-            let key = format!("{question:?}");
-            (seen.insert(key)).then_some(question)
-        })
-        .take(MAX_QUESTIONS_PER_BATCH)
-        .collect()
+    let mut normalized = Vec::new();
+    for input in questions.drain(..) {
+        let mut question = match input {
+            QueryInput::Structured(question) => question,
+            QueryInput::Other(value) => {
+                let _ = value;
+                return Err("the simulator does not understand unstructured or natural-language queries; use a structured query object with a supported kind".to_owned());
+            }
+        };
+        normalize_question(&mut question);
+        if seen.insert(format!("{question:?}")) {
+            normalized.push(question);
+            if normalized.len() >= MAX_QUESTIONS_PER_BATCH {
+                break;
+            }
+        }
+    }
+    Ok(normalized)
 }
 
-fn natural_language_query(text: &str) -> Option<StateQuestion> {
-    let text = text.to_ascii_lowercase();
-    if ["inventory", "carrying", "carried", "items"]
-        .iter()
-        .any(|term| text.contains(term))
-    {
-        Some(StateQuestion::Inventory)
-    } else if ["note", "notes"].iter().any(|term| text.contains(term)) {
-        Some(StateQuestion::Notes { limit: 8 })
-    } else if ["memory", "memories", "remember", "recollect"]
-        .iter()
-        .any(|term| text.contains(term))
-    {
-        Some(StateQuestion::Memories {
-            query: None,
-            about: None,
-            limit: 4,
-        })
-    } else if ["nearby", "surrounding", "environment", "objects", "see"]
-        .iter()
-        .any(|term| text.contains(term))
-    {
-        Some(StateQuestion::NearbyObjects {
-            radius: 8,
-            limit: 6,
-        })
-    } else if ["resident", "people", "person", "who is", "who are"]
-        .iter()
-        .any(|term| text.contains(term))
-    {
-        Some(StateQuestion::NearbyPeople {
-            radius: 8,
-            limit: 6,
-        })
-    } else if ["conversation", "talk", "said", "told"]
-        .iter()
-        .any(|term| text.contains(term))
-    {
-        Some(StateQuestion::Conversations {
-            with: None,
-            limit: 4,
-        })
-    } else if ["belief", "opinion", "attitude", "prefer"]
-        .iter()
-        .any(|term| text.contains(term))
-    {
-        Some(StateQuestion::Attitudes {
-            topic: None,
-            about: None,
-            limit: 6,
-        })
-    } else if ["invention", "invent"]
-        .iter()
-        .any(|term| text.contains(term))
-    {
-        Some(StateQuestion::Inventions {
-            query: None,
-            limit: 4,
-        })
-    } else if ["capability", "proposal", "request"]
-        .iter()
-        .any(|term| text.contains(term))
-    {
-        Some(StateQuestion::OpenCapabilityRequests { limit: 4 })
-    } else if ["place", "landmark", "where"]
-        .iter()
-        .any(|term| text.contains(term))
-    {
-        Some(StateQuestion::Places {
-            query: None,
-            limit: 4,
-        })
-    } else {
-        None
-    }
+pub(super) fn exclude_previous_questions(
+    questions: Vec<StateQuestion>,
+    asked: &mut HashSet<String>,
+) -> Vec<StateQuestion> {
+    questions
+        .into_iter()
+        .filter(|question| asked.insert(format!("{question:?}")))
+        .collect()
 }
 
 fn normalize_question(question: &mut StateQuestion) {

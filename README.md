@@ -89,15 +89,22 @@ environment variable. Non-loopback endpoints must use HTTPS, and credentials
 must not be embedded in the URL. `AI_SOCIETY_BASE_URL`, `AI_SOCIETY_MODEL`, and
 `AI_SOCIETY_API_KEY` can configure defaults; `AI_SOCIETY_API_KEY_ENV` can change
 the key variable name. With `--inference`, a resident first requests specific
-read-only state (such as inventory, nearby objects, a memory search, attitudes,
-people, conversations, or their own durable notes), then chooses an action from the returned subset. They can keep, review, revise, and delete their notes; these notes are distinct from fallible memories and do not decay. It
-can make up to two follow-up query rounds. The compact prompt always includes
-identity, position, immediate needs, and personal traits; other state is only
-included when queried. Query categories are logged during non-quiet runs.
+read-only state (such as inventory, a memory search, attitudes, people,
+conversations, or their own durable notes), then chooses an action from the
+returned subset. They can keep, review, revise, and delete their notes; notes
+are distinct from fallible memories and do not decay. Residents can make up to
+two follow-up query rounds. The compact prompt always includes
+identity, position, immediate needs, personal traits, nearby object IDs and
+distances, and interaction radii; other state is only included when queried.
+Queries must use structured objects from the supported schema; the simulator
+does not interpret natural-language questions. Query categories are logged
+during non-quiet runs. `Observe` is omitted from inference choices because it
+does not reveal state or change the world.
 Outputs are parsed as typed actions and validated by the simulation;
 truncated responses are retried with a bounded, increasing output budget.
-If inference fails or an action is rejected, the run stops with an error and
-does not substitute deterministic actions. Residents cannot add
+Invalid model decisions and rejected actions receive up to two additional
+model-driven correction attempts. Provider errors or repeated invalid
+decisions stop the run; deterministic fallback is never used. Residents cannot add
 executable behavior themselves: an unavailable action is recorded as a
 capability request, and a majority vote marks it accepted or declined for
 future implementation. The world is currently a bounded discrete grid (x/z

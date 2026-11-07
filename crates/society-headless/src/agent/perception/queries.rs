@@ -120,7 +120,12 @@ fn format_inventory(resident: &Resident) -> String {
     items.join(", ")
 }
 
-fn format_objects(village: &Village, resident: &Resident, radius: u8, limit: u8) -> String {
+pub(super) fn format_objects(
+    village: &Village,
+    resident: &Resident,
+    radius: u8,
+    limit: u8,
+) -> String {
     let mut objects: Vec<_> = village
         .world_objects()
         .iter()
@@ -392,7 +397,7 @@ fn format_places(village: &Village, resident: &Resident, query: Option<&str>, li
 }
 
 pub(super) fn supported_action_schema() -> &'static str {
-    "move_to(destination:{x,y,z}), observe, speak(to,text), eat, eat_resource(food,amount), rest(duration), gather(target,amount), drink(source), hunt(target), fish(target,amount), build(structure,position), destroy(target), dig(position), plant(seed,position), harvest(target,amount), craft_item(recipe), share_resource(to,resource,amount), play(activity,participants,duration), set_goal(goal), keep_note(text), update_note(note,text), delete_note(note), invent(name,description,materials), propose_capability(name,description,example), vote_capability(proposal,support). Notes are durable private notes you choose to keep; ask for notes before editing or deleting by ID. Structures: lean_to, fire_pit, storage_rack, workbench, garden, fence, raft. Recipes: stone_axe, spear, rope, basket, net. Resources: wood, stone, fiber, clay, grain, berries, grain_seed, berry_seed, meat, fish."
+    "move_to(destination:{x,y,z}), speak(to,text), eat, eat_resource(food,amount), rest(duration), gather(target,amount), drink(source), hunt(target), fish(target,amount), build(structure,position), destroy(target), dig(position), plant(seed,position), harvest(target,amount), craft_item(recipe), share_resource(to,resource,amount), play(activity,participants,duration), set_goal(goal), keep_note(text), update_note(note,text), delete_note(note), invent(name,description,materials), propose_capability(name,description,example), vote_capability(proposal,support). Notes are durable private notes you choose to keep; ask for notes before editing or deleting by ID. Structures: lean_to, fire_pit, storage_rack, workbench, garden, fence, raft. Recipes: stone_axe, spear, rope, basket, net. Resources: wood, stone, fiber, clay, grain, berries, grain_seed, berry_seed, meat, fish."
 }
 
 pub(super) fn supported_query_schema() -> &'static str {
