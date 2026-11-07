@@ -35,7 +35,10 @@ pub(super) async fn request_resident_action(
                 ),
                 ChatMessage::new("user", baseline.clone()),
             ],
-            max_tokens: 512,
+            // Reasoning models may spend several hundred tokens thinking before
+            // emitting the required JSON. Keep a generous cap so that the final
+            // answer is not truncated into an empty `content` field.
+            max_tokens: 2_048,
             temperature: 0.1,
             response_format: None,
             reasoning_effort: Some("low".to_owned()),
@@ -130,7 +133,7 @@ async fn ask_next_step(
                 ),
                 ChatMessage::new("user", format!("{baseline}\nRequested state:\n{context}")),
             ],
-            max_tokens: 768,
+            max_tokens: 2_048,
             temperature: 0.2,
             response_format: None,
             reasoning_effort: Some("low".to_owned()),
@@ -156,7 +159,7 @@ async fn ask_for_action(
                 ),
                 ChatMessage::new("user", format!("{baseline}\nRequested state:\n{context}")),
             ],
-            max_tokens: 768,
+            max_tokens: 2_048,
             temperature: 0.2,
             response_format: None,
             reasoning_effort: Some("low".to_owned()),

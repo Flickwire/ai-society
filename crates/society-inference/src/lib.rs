@@ -218,7 +218,7 @@ impl InferenceProvider for OpenAiCompatibleProvider {
         let url = self.endpoint("chat/completions")?;
         let model = self.selected_model().await?.to_owned();
         let body = CompletionRequest {
-            model,
+            model: model.clone(),
             messages: request.messages,
             max_tokens: request.max_tokens,
             temperature: request.temperature,
@@ -247,6 +247,13 @@ impl InferenceProvider for OpenAiCompatibleProvider {
         let choice = response.choices.into_iter().next().ok_or_else(|| {
             InferenceError::InvalidResponse("completion has no choices".to_owned())
         })?;
+        if choice.message.content.trim().is_empty() {
+            let finish_reason = choice.finish_reason.as_deref().unwrap_or("not reported");
+            return Err(InferenceError::InvalidResponse(format!(
+                "model `{}` returned empty assistant content (finish reason: {finish_reason}); increase its output-token budget or select a model that returns a final text response",
+                model
+            )));
+        }
         Ok(ChatResponse {
             content: choice.message.content,
             model: response.model,
