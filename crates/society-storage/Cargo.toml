@@ -12,3 +12,6 @@ society-sim = { path = "../society-sim" }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
