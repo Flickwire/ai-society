@@ -2,12 +2,14 @@
 .env.*
 !.env.example
 node_modules/
+target/
 dist/
 .turbo/
 coverage/
 *.gguf
 *.safetensors
 *.sqlite
+*.sqlite-*
 *.db
 *.log
 logs/

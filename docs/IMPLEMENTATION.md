@@ -1,5 +1,22 @@
 # Implementation plan — fully native Rust
 
+## Current implementation status
+
+The first runnable headless slice is implemented: workspace/toolchain, typed
+domain actions and events, deterministic village needs, a renderer-free CLI,
+SQLite WAL schema, checkpoint save/restore, and an OpenAI-compatible inference
+provider defaulting to LM Studio on `localhost:1234`. `run --inference` asks
+each resident for a typed action every virtual hour and validates it before
+commit. The starter environment has eight residents, twelve landmarks, and
+twenty wilderness object clusters with 3D positions. Implemented actions cover
+survival, movement, harvesting, hunting, fishing, construction, destruction,
+crafting, social exchange, recreation, goals, and invention records. Residents
+can propose unavailable actions and vote; a majority result is stored for
+future implementation and never becomes executable code automatically. Long-
+term memory, durable action event replay, richer construction projects, and the
+Bevy application remain future milestones. The full eight-week feature set is
+not yet implemented.
+
 ## 1. Definition of done
 
 Eight autonomous residents inhabit a persistent village with 12–20 locations, homes, market, workshop, shared resources and wilderness. They move, rest, eat, forage, craft, trade, converse, remember, form relationships and pursue evolving goals. A native Bevy application displays and inspects the town; a separate headless executable runs identical rules without loading graphics. An unattended seven-virtual-day run must survive restarts, preserve transaction invariants, record reasoning traces and support exact replay from stored model outputs.
