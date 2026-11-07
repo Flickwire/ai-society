@@ -23,6 +23,9 @@ crates/
   society-domain/       # shared IDs, actions, resources and events
   society-sim/          # deterministic world rules and state transitions
     src/types.rs        # residents, objects, social records, wilderness seed
+    src/personal.rs     # physical/personality/attitude/memory data
+    src/inner_life.rs   # memory decay and experiential changes
+    src/autonomy.rs     # need- and trait-sensitive no-model policy
     src/village.rs      # world state, snapshots, initialization and queries
     src/validation.rs   # action preconditions against current state
     src/actions.rs      # committed action effects and virtual-time updates
@@ -48,16 +51,30 @@ prompt. Keep inference transport in `society-inference`, world rules in
 The current executable creates a wilderness with eight residents, twelve
 landmarks, and twenty natural-object clusters. The 3D block-coordinate world has
 trees, rock, water, berries, wild grain, fiber, clay, caves, deer, rabbits, and
-fish. Residents have hunger, thirst, health, energy, morale, inventories, and
-personal goals. They can move, gather, hunt, fish, drink, eat, build, destroy,
+fish. Residents have hunger, thirst, health, energy, morale, inventories,
+individual physical and cognitive profiles, personality dimensions, private
+attitudes, and memories. They can move, gather, hunt, fish, drink, eat, build, destroy,
 dig, plant, harvest, craft, share resources, talk, play, invent, and request or
 vote on missing simulator capabilities. SQLite stores validated snapshots in
 WAL mode, and each `run` resumes from the latest snapshot.
+
+Actors remember their own choices; nearby witnesses form separate impressions
+and may misread intent. Memory vividness decays each virtual hour, with more
+significant and relevant memories fading more slowly. Memories and attitudes
+are shown only to that resident's inference prompt; use `inspect` to study an
+individual from the researcher CLI. Residents start without assigned
+occupations or self-chosen goals. Relationship-like opinions form through
+interaction rather than a preassigned social graph.
+
+Without `--inference`, `run` uses a small deterministic policy driven by
+immediate needs and resident traits. It has no market schedule, assigned job,
+or fixed relationship pattern; `inspect` helps compare individual changes.
 
 ```sh
 cargo run -p society-headless -- init --world village.sqlite
 cargo run -p society-headless -- run --world village.sqlite --hours 168
 cargo run -p society-headless -- doctor --world village.sqlite
+cargo run -p society-headless -- inspect --world village.sqlite --resident 1
 cargo run -p society-headless -- inference models
 cargo run -p society-headless -- inference prompt --text "Say hello in one sentence"
 cargo run -p society-headless -- run --world village.sqlite --hours 24 --inference
@@ -81,8 +98,8 @@ from -64 to 64, y from 0 to 16); movement can traverse up to twelve blocks per
 action, and structures appear immediately when their material costs are met.
 
 Build with `cargo build --workspace`; use `--help` for CLI options. Long-term
-memory, durable action-event replay, richer construction projects, and the
-Bevy viewer remain planned milestones.
+semantic memory and reflection, durable action-event replay, richer
+construction projects, and the Bevy viewer remain planned milestones.
 
 ## Plans
 

@@ -1,5 +1,6 @@
 //! Shared world entities and wilderness bootstrap data.
 
+use super::personal::{PersonalAttitude, PersonalMemory, Personality, PhysicalProfile};
 use serde::{Deserialize, Serialize};
 use society_domain::{
     CapabilityProposalId, PlaceId, Position, ResidentId, ResourceAmount, ResourceKind,
@@ -52,6 +53,24 @@ pub struct Resident {
     /// Current personal goal.
     #[serde(default = "default_goal")]
     pub goal: String,
+    /// Individual intelligence score. It can shift slowly through learning.
+    #[serde(default = "default_intelligence")]
+    pub intelligence: u8,
+    /// Evolving physical characteristics, initialized without assigning a role.
+    #[serde(default)]
+    pub physical: PhysicalProfile,
+    /// Individual personality tendencies, which can shift through experience.
+    #[serde(default)]
+    pub personality: Personality,
+    /// Private recollections; these may be incomplete, distorted, or mistaken.
+    #[serde(default)]
+    pub memories: Vec<PersonalMemory>,
+    /// Private, revisable views and preferences, including impressions of people.
+    #[serde(default)]
+    pub attitudes: Vec<PersonalAttitude>,
+    /// Progress toward cognitive learning through difficult or novel experiences.
+    #[serde(default)]
+    pub learning_experience: u8,
 }
 
 /// Category of a natural or constructed world object.
@@ -187,6 +206,10 @@ pub(super) fn default_morale() -> u8 {
 
 pub(super) fn default_goal() -> String {
     "find food and fresh water".to_owned()
+}
+
+pub(super) fn default_intelligence() -> u8 {
+    50
 }
 
 pub(super) fn wilderness_landmarks() -> Vec<Place> {

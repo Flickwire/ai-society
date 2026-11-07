@@ -52,6 +52,15 @@ enum Command {
         #[arg(long, default_value = "ai-society.sqlite")]
         world: PathBuf,
     },
+    /// Inspect one resident's individual traits, attitudes, and private memories.
+    Inspect {
+        /// Path to the world database.
+        #[arg(long, default_value = "ai-society.sqlite")]
+        world: PathBuf,
+        /// Resident identifier shown by `run`.
+        #[arg(long)]
+        resident: u64,
+    },
     /// List agent proposals for capabilities missing from the simulator.
     Feedback {
         /// Path to the world database.
@@ -205,7 +214,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     resident.position.y,
                     resident.position.z,
                     resident.inventory,
-                    resident.goal
+                    if resident.goal.is_empty() {
+                        "(none chosen)"
+                    } else {
+                        &resident.goal
+                    }
                 );
             }
         }
@@ -245,6 +258,84 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             println!("inference: use `society-headless inference models` to check a provider");
             println!("graphical viewer: not implemented yet");
+        }
+        Command::Inspect { world, resident } => {
+            let store = Store::open(&world).await?;
+            let Some(village) = store.load().await? else {
+                return Err(format!("no saved world at {}", world.display()).into());
+            };
+            let Some(person) = village
+                .residents()
+                .iter()
+                .find(|person| person.id.0 == resident)
+            else {
+                return Err(format!("resident {resident} is not in this world").into());
+            };
+            println!("{} (resident {})", person.name, person.id.0);
+            println!(
+                "  body: {} cm, {} kg, fitness {}, strength {}",
+                person.physical.stature_cm,
+                person.physical.mass_kg,
+                person.physical.fitness,
+                person.physical.strength
+            );
+            println!("  intelligence: {} / 100", person.intelligence);
+            println!(
+                "  personality: openness {}, conscientiousness {}, extraversion {}, agreeableness {}, emotional stability {}",
+                person.personality.openness,
+                person.personality.conscientiousness,
+                person.personality.extraversion,
+                person.personality.agreeableness,
+                person.personality.emotional_stability
+            );
+            println!(
+                "  self-chosen goal: {}",
+                if person.goal.is_empty() {
+                    "(none)"
+                } else {
+                    &person.goal
+                }
+            );
+            println!("  private attitudes:");
+            for attitude in &person.attitudes {
+                let target = attitude.target.map_or_else(String::new, |id| {
+                    let name = village
+                        .residents()
+                        .iter()
+                        .find(|other| other.id == id)
+                        .map_or_else(|| format!("#{}", id.0), |other| other.name.clone());
+                    format!(" about {name}")
+                });
+                println!(
+                    "    {:?} {}{}: leaning {}, conviction {}, updated hour {}",
+                    attitude.kind,
+                    attitude.topic,
+                    target,
+                    attitude.leaning,
+                    attitude.conviction,
+                    attitude.updated_at.0
+                );
+            }
+            let mut memories: Vec<_> = person.memories.iter().collect();
+            memories.sort_by_key(|memory| {
+                std::cmp::Reverse(
+                    u32::from(memory.strength)
+                        * u32::from(memory.significance)
+                        * u32::from(memory.relevance),
+                )
+            });
+            println!("  strongest private recollections:");
+            for memory in memories.into_iter().take(12) {
+                println!(
+                    "    [hour {}, strength {}, importance {}, relevance {}, confidence {}] {}",
+                    memory.formed_at.0,
+                    memory.strength,
+                    memory.significance,
+                    memory.relevance,
+                    memory.confidence,
+                    memory.recollection
+                );
+            }
         }
         Command::Feedback { world } => {
             let store = Store::open(&world).await?;

@@ -128,20 +128,79 @@ async fn request_resident_action(
         .collect::<Vec<_>>()
         .join("; ");
     let inventory = serde_json::to_string(&resident.inventory)?;
+    let attitudes = resident
+        .attitudes
+        .iter()
+        .map(|attitude| {
+            let target = attitude
+                .target
+                .map_or_else(String::new, |id| format!(" about resident {}", id.0));
+            format!(
+                "{:?} {}{} (leaning {}, conviction {})",
+                attitude.kind, attitude.topic, target, attitude.leaning, attitude.conviction
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    let mut memories: Vec<_> = resident
+        .memories
+        .iter()
+        .filter(|memory| memory.strength > 0)
+        .collect();
+    memories.sort_by_key(|memory| {
+        std::cmp::Reverse(
+            u32::from(memory.strength)
+                * u32::from(memory.significance)
+                * u32::from(memory.relevance),
+        )
+    });
+    let memories = memories
+        .into_iter()
+        .take(5)
+        .map(|memory| {
+            format!(
+                "hour {}: {} [vividness {}, importance {}, relevance {}, confidence {}]",
+                memory.formed_at.0,
+                memory.recollection,
+                memory.strength,
+                memory.significance,
+                memory.relevance,
+                memory.confidence
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    let goal = if resident.goal.is_empty() {
+        "(none chosen)"
+    } else {
+        &resident.goal
+    };
     let prompt = format!(
-        "Hour {}. {} id {} at ({},{},{}). Goal: {}. Needs h{} t{} e{} hp{} m{}. Inventory: {}. Nearby objects: {}. Nearby people: {}. Capability requests: {}. Choose one JSON action. Supported types: move_to destination{{x,y,z}}, observe, speak to/text, eat, eat_resource food/amount, rest duration, gather target/amount, drink source, hunt target, fish target/amount, build structure/position, destroy target, dig position, plant seed/position, harvest target/amount, craft_item recipe, share_resource to/resource/amount, play activity/participants/duration, set_goal goal, invent name/description/materials, propose_capability name/description/example, vote_capability proposal/support. Coordinates are integers. Structures: lean_to, fire_pit, storage_rack, workbench, garden, fence, raft. Recipes: stone_axe, spear, rope, basket, net. Resources/food: wood, stone, fiber, clay, grain, berries, grain_seed, berry_seed, meat, fish. Move at most 12 blocks per action. If you want an unsupported behavior, propose_capability; never invent action types. Return the JSON only.",
+        "Hour {}. {} id {} at ({},{},{}). Goal: {}. Needs h{} t{} e{} hp{} m{}. Body: height {}cm, mass {}kg, fitness {}, strength {}. Intelligence {} (score 0–100). Personality: openness {}, conscientiousness {}, extraversion {}, agreeableness {}, emotional stability {} (each 0–100). Your attitudes: {}. Attitude leaning is -100 oppose/dislike, 0 uncertain, +100 support/like; conviction is strength. Your private recollections: {}. Recollections are personal impressions, may be wrong or incomplete, and are not shared by others. Inventory: {}. Nearby objects: {}. Nearby people: {}. Capability requests: {}. You have no assigned social role; decide for yourself using current needs, your own traits, attitudes and recollections. Choose one JSON action. Supported types: move_to destination{{x,y,z}}, observe, speak to/text, eat, eat_resource food/amount, rest duration, gather target/amount, drink source, hunt target, fish target/amount, build structure/position, destroy target, dig position, plant seed/position, harvest target/amount, craft_item recipe, share_resource to/resource/amount, play activity/participants/duration, set_goal goal, invent name/description/materials, propose_capability name/description/example, vote_capability proposal/support. Coordinates are integers. Structures: lean_to, fire_pit, storage_rack, workbench, garden, fence, raft. Recipes: stone_axe, spear, rope, basket, net. Resources/food: wood, stone, fiber, clay, grain, berries, grain_seed, berry_seed, meat, fish. Move at most 12 blocks per action. If you want an unsupported behavior, propose_capability; never invent action types. Return the JSON only.",
         village.now().0,
         resident.name,
         resident.id.0,
         resident.position.x,
         resident.position.y,
         resident.position.z,
-        resident.goal,
+        goal,
         resident.hunger,
         resident.thirst,
         resident.energy,
         resident.health,
         resident.morale,
+        resident.physical.stature_cm,
+        resident.physical.mass_kg,
+        resident.physical.fitness,
+        resident.physical.strength,
+        resident.intelligence,
+        resident.personality.openness,
+        resident.personality.conscientiousness,
+        resident.personality.extraversion,
+        resident.personality.agreeableness,
+        resident.personality.emotional_stability,
+        attitudes,
+        memories,
         inventory,
         visible_objects,
         nearby_people,

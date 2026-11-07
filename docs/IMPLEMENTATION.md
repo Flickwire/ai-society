@@ -12,8 +12,14 @@ twenty wilderness object clusters with 3D positions. Implemented actions cover
 survival, movement, harvesting, hunting, fishing, construction, destruction,
 crafting, social exchange, recreation, goals, and invention records. Residents
 can propose unavailable actions and vote; a majority result is stored for
-future implementation and never becomes executable code automatically. Long-
-term memory, durable action event replay, richer construction projects, and the
+future implementation and never becomes executable code automatically.
+Residents have varied physical and cognitive profiles, mutable personality
+dimensions, private attitudes, and fallible actor/witness memories. Memories
+decay hourly according to significance and relevance and enter only the owner's
+inference prompt. The `inspect` command exposes these individual state records
+for research. No-inference runs use a deterministic needs- and trait-sensitive
+policy without assigned jobs or daily schedules. Long-term semantic memory and
+reflection, durable action event replay, richer construction projects, and the
 Bevy application remain future milestones. The full eight-week feature set is
 not yet implemented.
 

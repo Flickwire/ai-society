@@ -23,6 +23,12 @@ the simulator; use `docs/IMPLEMENTATION.md` for the longer-term roadmap.
   structure types, `Action`, proposals, events, and rejection reasons.
 - `crates/society-sim/src/types.rs`: resident/object/social records and initial
   wilderness seed data.
+- `crates/society-sim/src/personal.rs`: physical profiles, personality,
+  attitudes, and memory record types.
+- `crates/society-sim/src/inner_life.rs`: memory formation/decay, emergent
+  person-to-person impressions, and gradual trait adaptation.
+- `crates/society-sim/src/autonomy.rs`: simple no-model choices driven by needs
+  and individual traits. Do not add daily schedules or occupational roles.
 - `crates/society-sim/src/village.rs`: authoritative world state, snapshot
   serialization/validation, initialization, and read-only queries.
 - `crates/society-sim/src/validation.rs`: action preconditions and bounds.
@@ -76,8 +82,9 @@ boundary, even when the prompt tells the model those same rules.
   action events are not currently written to the event log and replay is not
   implemented. Do not describe snapshots as event sourcing.
 - World snapshot format is version 2. `Village::from_snapshot` accepts formats
-  1 and 2 and upgrades v1 data in memory. If changing serialized state, decide
-  whether to add a format migration and preserve existing database behavior.
+  1 through 3 and upgrades older resident records with default personal
+  attributes. If changing serialized state, decide whether to add a format
+  migration and preserve existing database behavior.
 - Committed idempotency keys are in-memory and are not persisted across restart.
 - Use a new temporary database path for manual scenarios, e.g.
   `/tmp/ai-society-dev.sqlite`; do not overwrite a user's saved world.
@@ -92,6 +99,14 @@ boundary, even when the prompt tells the model those same rules.
 - The client requests one action per resident per virtual hour. Invalid output
   or a provider error uses deterministic fallback behavior; after the first
   provider error, inference is disabled for the remainder of that run.
+- Residents see only their own strongest recent memories and personal attitudes
+  in the decision prompt. Witness memories include uncertain interpretations;
+  never treat these as canonical event history or expose another resident's
+  recollections to the current agent.
+- Memories are recorded from actor and nearby witness perspectives and fade
+  each virtual hour. Significance and relevance slow decay; confidence is
+  subjective certainty, not verified accuracy. Personal impressions of other
+  residents form through interaction and can shift in either direction.
 - Providers differ in structured-output and reasoning support. Keep optional
   compatibility fields optional and parse only the response content, never
   hidden reasoning fields. A local model can be reachable yet fail to return a
@@ -108,6 +123,7 @@ cargo run -p society-headless -- --help
 cargo run -p society-headless -- init --world /tmp/ai-society-dev.sqlite
 cargo run -p society-headless -- run --world /tmp/ai-society-dev.sqlite --hours 1
 cargo run -p society-headless -- doctor --world /tmp/ai-society-dev.sqlite
+cargo run -p society-headless -- inspect --world /tmp/ai-society-dev.sqlite --resident 1
 ```
 
 Use the smallest relevant CLI scenario after behavior changes. Inference smoke

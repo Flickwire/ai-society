@@ -1,12 +1,16 @@
 //! Action validation and authoritative world transitions.
 
+use super::autonomy::choose_action;
 use super::clock::ClockError;
+use super::inner_life::{
+    decay_memories, evolve_from_action, record_action_memories, update_body_from_needs,
+};
 use super::rules::*;
 use super::types::*;
 use super::village::{TickReport, Village};
 use society_domain::{
-    Action, ActionProposal, CapabilityProposalId, PlaceId, RejectionReason, ResourceKind,
-    StructureKind, VirtualTime, WorldEvent,
+    Action, ActionProposal, CapabilityProposalId, RejectionReason, ResourceKind, StructureKind,
+    VirtualTime, WorldEvent,
 };
 
 impl Village {
@@ -37,56 +41,30 @@ impl Village {
         remove_resource(&mut self.residents[resident_index], resource, amount);
     }
 
-    /// Advances one hour and lets each resident follow deterministic need rules.
+    /// Advances one hour and applies a simple need- and trait-sensitive policy.
     pub fn tick(&mut self) -> Result<TickReport, ClockError> {
         let mut report = self.advance_for_decisions()?;
-        let hour = report.time.0 % 24;
-
-        for resident in &mut self.residents {
-            if resident.hunger >= 70 && resident.food > 0 {
-                resident.food -= 1;
-                resident.hunger = resident.hunger.saturating_sub(45);
-                report.actions.push(format!("{} eats", resident.name));
-            } else if resident.hunger >= 55 && self.forage_stock > 0 {
-                if resident.place != PlaceId(4) {
-                    resident.place = PlaceId(4);
-                    report
-                        .actions
-                        .push(format!("{} goes to forage", resident.name));
-                } else {
-                    resident.food = resident.food.saturating_add(1);
-                    self.forage_stock -= 1;
-                    report.actions.push(format!("{} forages", resident.name));
-                }
-            } else if resident.energy <= 25 || !(7..22).contains(&hour) {
-                resident.energy = resident.energy.saturating_add(18).min(100);
-                report.actions.push(format!("{} rests", resident.name));
-            } else if hour == (resident.id.0 % 8) + 8 {
-                resident.place = PlaceId(3);
-                resident.energy = resident.energy.saturating_sub(2);
+        let ids: Vec<_> = self.residents.iter().map(|resident| resident.id).collect();
+        for id in ids {
+            let Some(resident) = self
+                .residents
+                .iter()
+                .find(|resident| resident.id == id)
+                .cloned()
+            else {
+                continue;
+            };
+            let action = choose_action(self, &resident);
+            let event = self.apply(ActionProposal {
+                resident: id,
+                expected_version: self.version(),
+                idempotency_key: format!("autonomy-{}-{}", id.0, report.time.0),
+                action,
+            });
+            if let WorldEvent::ActionCommitted { action, .. } = event {
                 report
                     .actions
-                    .push(format!("{} works at the market", resident.name));
-            } else if hour == (resident.id.0 % 8) + 16 {
-                resident.place = PlaceId(2);
-                report
-                    .actions
-                    .push(format!("{} returns home", resident.name));
-            } else if resident.place == PlaceId(2) && hour == 6 {
-                resident.place = PlaceId(1);
-                report
-                    .actions
-                    .push(format!("{} visits the common green", resident.name));
-            } else if resident.place == PlaceId(1) && hour == 7 {
-                resident.place = PlaceId(4);
-                report
-                    .actions
-                    .push(format!("{} heads to the wilderness", resident.name));
-            } else if resident.place == PlaceId(4) && hour == 8 {
-                resident.place = PlaceId(2);
-                report
-                    .actions
-                    .push(format!("{} returns from the wilderness", resident.name));
+                    .push(format!("{}: {action:?}", resident.name));
             }
         }
         Ok(report)
@@ -114,6 +92,10 @@ impl Village {
             if resident.health < 50 {
                 resident.morale = resident.morale.saturating_sub(1);
             }
+        }
+        decay_memories(&mut self.residents, next_time);
+        if next_time.0 % 24 == 0 {
+            update_body_from_needs(&mut self.residents, next_time);
         }
         if next_time.0 % 24 == 0 {
             for object in &mut self.world_objects {
@@ -193,6 +175,24 @@ impl Village {
         if !self.action_is_valid(index, &proposal.action) {
             return reject(RejectionReason::InvalidAction);
         }
+
+        let actor_position = self.residents[index].position;
+        let observers: Vec<_> = self
+            .residents
+            .iter()
+            .filter(|resident| {
+                resident.id != proposal.resident && resident.position.distance(actor_position) <= 8
+            })
+            .map(|resident| resident.id)
+            .collect();
+        let event_time = self.clock.now();
+        record_action_memories(
+            &mut self.residents,
+            proposal.resident,
+            &proposal.action,
+            &observers,
+            event_time,
+        );
 
         match &proposal.action {
             Action::Move { destination } => {
@@ -480,6 +480,12 @@ impl Village {
             | Action::OfferTrade { .. }
             | Action::AcceptTrade { .. } => {}
         }
+        evolve_from_action(
+            &mut self.residents,
+            proposal.resident,
+            &proposal.action,
+            event_time,
+        );
         self.committed_keys.insert(proposal.idempotency_key);
         if self.clock.commit().is_err() {
             return reject(RejectionReason::InvalidAction);

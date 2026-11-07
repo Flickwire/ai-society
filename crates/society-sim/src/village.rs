@@ -1,6 +1,9 @@
 //! Village state, initialization, persistence snapshots, and observation accessors.
 
 use super::clock::SimulationClock;
+use super::inner_life::{
+    initial_attitudes, initial_intelligence, initial_personality, initial_physical,
+};
 use super::rules::*;
 use super::types::*;
 use serde::{Deserialize, Serialize};
@@ -40,7 +43,7 @@ pub struct Village {
     pub(super) committed_keys: HashSet<String>,
 }
 
-/// Versioned checkpoint of authoritative simulation state.
+/// Version 3 checkpoint of authoritative simulation state, with v1/v2 import support.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct VillageSnapshot {
     /// Snapshot format version.
@@ -123,13 +126,13 @@ impl Village {
                         (ResourceKind::Berries, 1),
                         (ResourceKind::Fiber, 1),
                     ]),
-                    goal: [
-                        "find a reliable source of food",
-                        "find fresh water",
-                        "make a safe place to sleep",
-                        "discover useful materials",
-                    ][index % 4]
-                        .to_owned(),
+                    goal: String::new(),
+                    intelligence: initial_intelligence(index as u64 + 1),
+                    physical: initial_physical(index as u64 + 1),
+                    personality: initial_personality(index as u64 + 1),
+                    memories: Vec::new(),
+                    attitudes: initial_attitudes(index as u64 + 1),
+                    learning_experience: 0,
                 }
             })
             .collect();
@@ -164,7 +167,7 @@ impl Village {
     #[must_use]
     pub fn snapshot(&self) -> VillageSnapshot {
         VillageSnapshot {
-            format_version: 2,
+            format_version: 3,
             clock: self.clock.clone(),
             places: self.places.clone(),
             residents: self.residents.clone(),
@@ -180,7 +183,7 @@ impl Village {
 
     /// Restores a village after validating entity references and needs.
     pub fn from_snapshot(snapshot: VillageSnapshot) -> Result<Self, SnapshotError> {
-        if !(1..=2).contains(&snapshot.format_version) {
+        if !(1..=3).contains(&snapshot.format_version) {
             return Err(SnapshotError::UnsupportedVersion(snapshot.format_version));
         }
         if snapshot.places.is_empty() || snapshot.residents.is_empty() {
@@ -206,10 +209,45 @@ impl Village {
                 || resident.health > 100
                 || resident.morale > 100
                 || resident.goal.len() > 120
+                || !(1..=100).contains(&resident.intelligence)
+                || !(100..=250).contains(&resident.physical.stature_cm)
+                || !(25..=300).contains(&resident.physical.mass_kg)
+                || resident.physical.fitness > 100
+                || resident.physical.strength > 100
+                || resident.physical.conditioning_experience >= 8
+                || resident.learning_experience >= 6
+                || resident.personality.openness > 100
+                || resident.personality.conscientiousness > 100
+                || resident.personality.extraversion > 100
+                || resident.personality.agreeableness > 100
+                || resident.personality.emotional_stability > 100
                 || resident
                     .inventory
                     .values()
                     .any(|count| *count > MAX_INVENTORY_PER_RESOURCE)
+                || resident.memories.len() > 128
+                || resident.memories.iter().any(|memory| {
+                    memory.recollection.len() > 500
+                        || memory.topic.len() > 64
+                        || memory.strength > 100
+                        || memory.significance > 100
+                        || memory.relevance > 100
+                        || memory.confidence > 100
+                        || !(-100..=100).contains(&memory.emotional_tone)
+                        || memory.formed_at > snapshot.clock.now()
+                        || memory.about.is_some_and(|id| !resident_ids.contains(&id))
+                })
+                || resident.attitudes.len() > 48
+                || resident.attitudes.iter().any(|attitude| {
+                    attitude.topic.is_empty()
+                        || attitude.topic.len() > 64
+                        || !(-100..=100).contains(&attitude.leaning)
+                        || attitude.conviction > 100
+                        || attitude.updated_at > snapshot.clock.now()
+                        || attitude
+                            .target
+                            .is_some_and(|id| !resident_ids.contains(&id))
+                })
         }) {
             return Err(SnapshotError::InvalidResidentState);
         }
