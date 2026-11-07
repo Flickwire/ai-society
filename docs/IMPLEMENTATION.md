@@ -5,9 +5,11 @@
 The first runnable headless slice is implemented: workspace/toolchain, typed
 domain actions and events, deterministic village needs, a renderer-free CLI,
 SQLite WAL schema, checkpoint save/restore, and an OpenAI-compatible inference
-provider defaulting to LM Studio on `localhost:1234`. `run --inference` asks
-each resident for a typed action every virtual hour and validates it before
-commit. The starter environment has eight residents, twelve landmarks, and
+provider defaulting to LM Studio on `localhost:1234`. `run --inference` gives
+each resident a compact baseline, accepts bounded read-only state questions,
+answers only the requested queries, allows two follow-up query rounds, and
+validates the resulting typed action before commit. The starter environment
+has eight residents, twelve landmarks, and
 twenty wilderness object clusters with 3D positions. Implemented actions cover
 survival, movement, harvesting, hunting, fishing, construction, destruction,
 crafting, social exchange, recreation, goals, and invention records. Residents

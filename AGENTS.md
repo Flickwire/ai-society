@@ -38,8 +38,11 @@ the simulator; use `docs/IMPLEMENTATION.md` for the longer-term roadmap.
 - `crates/society-inference/src/lib.rs`: provider trait and OpenAI-compatible
   HTTP implementation. Default base URL: `http://localhost:1234/v1`.
 - `crates/society-headless/src/main.rs`: CLI commands and wiring.
-  `crates/society-headless/src/agent.rs`: perception prompt, typed response
-  parsing, supported-action check, and safe fallback policy.
+  `crates/society-headless/src/agent.rs`: turn scheduling, action validation,
+  and safe fallback policy.
+- `crates/society-headless/src/agent/perception.rs`: query/decide protocol and
+  compact resident baseline; `perception/schema.rs` defines the allowlisted
+  bounded query types; `perception/queries.rs` answers them from current state.
 - `crates/society-storage/src/lib.rs`: SQLite connection, schema migration,
   complete snapshot save/load. SQL schema is in `migrations/`.
 
@@ -107,6 +110,10 @@ boundary, even when the prompt tells the model those same rules.
   each virtual hour. Significance and relevance slow decay; confidence is
   subjective certainty, not verified accuracy. Personal impressions of other
   residents form through interaction and can shift in either direction.
+- Inference perception always starts with position, immediate needs, and
+  individual traits. Every other state detail must be requested through the
+  bounded query allowlist. Keep queries read-only, cap their result counts, and
+  keep the follow-up-round and combined-context limits in place.
 - Providers differ in structured-output and reasoning support. Keep optional
   compatibility fields optional and parse only the response content, never
   hidden reasoning fields. A local model can be reachable yet fail to return a

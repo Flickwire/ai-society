@@ -1,7 +1,9 @@
-//! LLM decision loop, action validation, and deterministic fallback behavior.
+//! LLM action loop, output validation, and deterministic fallback behavior.
+
+mod perception;
 
 use society_domain::{Action, ActionProposal, WorldEvent};
-use society_inference::{ChatMessage, ChatRequest, InferenceProvider};
+use society_inference::InferenceProvider;
 use society_sim::{Resident, Village};
 use society_storage::Store;
 
@@ -32,8 +34,17 @@ pub(super) async fn run_with_inference(
                 .expect("resident IDs came from the current village");
             let expected_version = village.version();
             let action = if provider_available {
-                match request_resident_action(provider, village, &resident).await {
-                    Ok(action) => action,
+                match perception::request_resident_action(provider, village, &resident).await {
+                    Ok(decision) => {
+                        if !quiet && !decision.queries.is_empty() {
+                            eprintln!(
+                                "{} asked the simulator for: {}",
+                                resident.name,
+                                decision.queries.join(", ")
+                            );
+                        }
+                        decision.action
+                    }
                     Err(error) => {
                         if !quiet {
                             eprintln!(
@@ -80,165 +91,6 @@ pub(super) async fn run_with_inference(
         reports.push(report);
     }
     Ok(reports)
-}
-
-async fn request_resident_action(
-    provider: &impl InferenceProvider,
-    village: &Village,
-    resident: &Resident,
-) -> Result<Action, Box<dyn std::error::Error>> {
-    let visible_objects = village
-        .world_objects()
-        .iter()
-        .filter(|object| resident.position.distance(object.position) <= 16)
-        .take(8)
-        .map(|object| {
-            format!(
-                "#{} {} ({:?}, at {},{},{}; available {})",
-                object.id.0,
-                object.name,
-                object.kind,
-                object.position.x,
-                object.position.y,
-                object.position.z,
-                object.quantity
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("; ");
-    let nearby_people = village
-        .residents()
-        .iter()
-        .filter(|other| other.id != resident.id && resident.position.distance(other.position) <= 8)
-        .map(|other| format!("{} (id {})", other.name, other.id.0))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let open_requests = village
-        .capability_requests()
-        .iter()
-        .filter(|request| request.status == society_sim::CapabilityStatus::Open)
-        .map(|request| {
-            let yes = request.votes.iter().filter(|vote| vote.support).count();
-            let no = request.votes.len() - yes;
-            format!(
-                "#{} {}: {} ({yes} support, {no} oppose)",
-                request.id.0, request.name, request.description
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("; ");
-    let inventory = serde_json::to_string(&resident.inventory)?;
-    let attitudes = resident
-        .attitudes
-        .iter()
-        .map(|attitude| {
-            let target = attitude
-                .target
-                .map_or_else(String::new, |id| format!(" about resident {}", id.0));
-            format!(
-                "{:?} {}{} (leaning {}, conviction {})",
-                attitude.kind, attitude.topic, target, attitude.leaning, attitude.conviction
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("; ");
-    let mut memories: Vec<_> = resident
-        .memories
-        .iter()
-        .filter(|memory| memory.strength > 0)
-        .collect();
-    memories.sort_by_key(|memory| {
-        std::cmp::Reverse(
-            u32::from(memory.strength)
-                * u32::from(memory.significance)
-                * u32::from(memory.relevance),
-        )
-    });
-    let memories = memories
-        .into_iter()
-        .take(5)
-        .map(|memory| {
-            format!(
-                "hour {}: {} [vividness {}, importance {}, relevance {}, confidence {}]",
-                memory.formed_at.0,
-                memory.recollection,
-                memory.strength,
-                memory.significance,
-                memory.relevance,
-                memory.confidence
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("; ");
-    let goal = if resident.goal.is_empty() {
-        "(none chosen)"
-    } else {
-        &resident.goal
-    };
-    let prompt = format!(
-        "Hour {}. {} id {} at ({},{},{}). Goal: {}. Needs h{} t{} e{} hp{} m{}. Body: height {}cm, mass {}kg, fitness {}, strength {}. Intelligence {} (score 0–100). Personality: openness {}, conscientiousness {}, extraversion {}, agreeableness {}, emotional stability {} (each 0–100). Your attitudes: {}. Attitude leaning is -100 oppose/dislike, 0 uncertain, +100 support/like; conviction is strength. Your private recollections: {}. Recollections are personal impressions, may be wrong or incomplete, and are not shared by others. Inventory: {}. Nearby objects: {}. Nearby people: {}. Capability requests: {}. You have no assigned social role; decide for yourself using current needs, your own traits, attitudes and recollections. Choose one JSON action. Supported types: move_to destination{{x,y,z}}, observe, speak to/text, eat, eat_resource food/amount, rest duration, gather target/amount, drink source, hunt target, fish target/amount, build structure/position, destroy target, dig position, plant seed/position, harvest target/amount, craft_item recipe, share_resource to/resource/amount, play activity/participants/duration, set_goal goal, invent name/description/materials, propose_capability name/description/example, vote_capability proposal/support. Coordinates are integers. Structures: lean_to, fire_pit, storage_rack, workbench, garden, fence, raft. Recipes: stone_axe, spear, rope, basket, net. Resources/food: wood, stone, fiber, clay, grain, berries, grain_seed, berry_seed, meat, fish. Move at most 12 blocks per action. If you want an unsupported behavior, propose_capability; never invent action types. Return the JSON only.",
-        village.now().0,
-        resident.name,
-        resident.id.0,
-        resident.position.x,
-        resident.position.y,
-        resident.position.z,
-        goal,
-        resident.hunger,
-        resident.thirst,
-        resident.energy,
-        resident.health,
-        resident.morale,
-        resident.physical.stature_cm,
-        resident.physical.mass_kg,
-        resident.physical.fitness,
-        resident.physical.strength,
-        resident.intelligence,
-        resident.personality.openness,
-        resident.personality.conscientiousness,
-        resident.personality.extraversion,
-        resident.personality.agreeableness,
-        resident.personality.emotional_stability,
-        attitudes,
-        memories,
-        inventory,
-        visible_objects,
-        nearby_people,
-        open_requests,
-    );
-    let response = provider
-        .chat(ChatRequest {
-            messages: vec![
-                ChatMessage::new(
-                    "system",
-                    "Choose one immediate action for this resident. Output one JSON object only, with no explanation. Never claim an action succeeded; the simulation validates it.",
-                ),
-                ChatMessage::new("user", prompt),
-            ],
-            max_tokens: 1024,
-            temperature: 0.3,
-            // LM Studio supports this extension; servers that ignore unknown fields remain
-            // OpenAI-compatible. Omitting JSON mode avoids incompatible json_object variants.
-            response_format: None,
-            reasoning_effort: Some("low".to_owned()),
-        })
-        .await?;
-    if response.content.trim().is_empty() {
-        return Err(format!(
-            "provider returned empty action text (finish reason: {:?}, completion tokens: {:?})",
-            response.finish_reason, response.completion_tokens
-        )
-        .into());
-    }
-    let text = response
-        .content
-        .trim()
-        .trim_start_matches("```json")
-        .trim_start_matches("```")
-        .trim_end_matches("```")
-        .trim();
-    let action: Action = serde_json::from_str(text)?;
-    validate_agent_action(action)
 }
 
 fn validate_agent_action(action: Action) -> Result<Action, Box<dyn std::error::Error>> {

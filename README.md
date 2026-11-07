@@ -87,10 +87,15 @@ to select another OpenAI-compatible service; the key is read from the named
 environment variable. Non-loopback endpoints must use HTTPS, and credentials
 must not be embedded in the URL. `AI_SOCIETY_BASE_URL`, `AI_SOCIETY_MODEL`, and
 `AI_SOCIETY_API_KEY` can configure defaults; `AI_SOCIETY_API_KEY_ENV` can change
-the key variable name. With `--inference`, each resident
-gets one model decision per virtual hour. Outputs are parsed as typed actions
-and validated by the simulation; connection failures, malformed outputs, and
-invalid actions use a safe deterministic fallback. Residents cannot add
+the key variable name. With `--inference`, a resident first requests specific
+read-only state (such as inventory, nearby objects, a memory search, attitudes,
+people, or conversations), then chooses an action from the returned subset. It
+can make up to two follow-up query rounds. The compact prompt always includes
+identity, position, immediate needs, and personal traits; other state is only
+included when queried. Query categories are logged during non-quiet runs.
+Outputs are parsed as typed actions and validated by the simulation;
+connection failures, malformed outputs, and invalid actions use a safe
+deterministic fallback. Residents cannot add
 executable behavior themselves: an unavailable action is recorded as a
 capability request, and a majority vote marks it accepted or declined for
 future implementation. The world is currently a bounded discrete grid (x/z
