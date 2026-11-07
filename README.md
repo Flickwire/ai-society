@@ -78,6 +78,7 @@ cargo run -p society-headless -- inspect --world village.sqlite --resident 1
 cargo run -p society-headless -- inference models
 cargo run -p society-headless -- inference prompt --text "Say hello in one sentence"
 cargo run -p society-headless -- run --world village.sqlite --hours 24 --inference
+cargo run -p society-headless -- run --world village.sqlite --hours 24 --storyteller --storyteller-interval 6
 cargo run -p society-headless -- feedback --world village.sqlite
 ```
 
@@ -101,6 +102,13 @@ capability request, and a majority vote marks it accepted or declined for
 future implementation. The world is currently a bounded discrete grid (x/z
 from -64 to 64, y from 0 to 16); movement can traverse up to twelve blocks per
 action, and structures appear immediately when their material costs are met.
+
+`--storyteller` enables optional CLI chronicles without enabling resident LLM
+decisions. It uses the same configured provider to summarize recent action
+counts, residents' current public status and self-chosen goals, and notable
+world changes at `--storyteller-interval` virtual hours (default 6). Summaries
+are observational only, are not added to resident prompts, and do not change
+the simulation. The flag still prints chronicles when used with `--quiet`.
 
 Build with `cargo build --workspace`; use `--help` for CLI options. Long-term
 semantic memory and reflection, durable action-event replay, richer

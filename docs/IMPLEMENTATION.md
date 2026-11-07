@@ -15,6 +15,9 @@ survival, movement, harvesting, hunting, fishing, construction, destruction,
 crafting, social exchange, recreation, goals, and invention records. Residents
 can propose unavailable actions and vote; a majority result is stored for
 future implementation and never becomes executable code automatically.
+The CLI also has an optional periodic storyteller that summarizes recent
+actions, current resident status, and significant world deltas without feeding
+narration back into the simulation.
 Residents have varied physical and cognitive profiles, mutable personality
 dimensions, private attitudes, and fallible actor/witness memories. Memories
 decay hourly according to significance and relevance and enter only the owner's

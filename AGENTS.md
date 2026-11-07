@@ -40,6 +40,8 @@ the simulator; use `docs/IMPLEMENTATION.md` for the longer-term roadmap.
 - `crates/society-headless/src/main.rs`: CLI commands and wiring.
   `crates/society-headless/src/agent.rs`: turn scheduling, action validation,
   and safe fallback policy.
+- `crates/society-headless/src/agent/storyteller.rs`: bounded public-state and
+  world-delta evidence for optional CLI narration. Story text is display-only.
 - `crates/society-headless/src/agent/perception.rs`: query/decide protocol and
   compact resident baseline; `perception/schema.rs` defines the allowlisted
   bounded query types; `perception/queries.rs` answers them from current state.
@@ -114,6 +116,9 @@ boundary, even when the prompt tells the model those same rules.
   individual traits. Every other state detail must be requested through the
   bounded query allowlist. Keep queries read-only, cap their result counts, and
   keep the follow-up-round and combined-context limits in place.
+- Storyteller requests use committed action summaries and before/after snapshots;
+  do not pass private memories or attitudes to this observer, feed summaries
+  back into resident decisions, or let narration mutate authoritative state.
 - Providers differ in structured-output and reasoning support. Keep optional
   compatibility fields optional and parse only the response content, never
   hidden reasoning fields. A local model can be reachable yet fail to return a

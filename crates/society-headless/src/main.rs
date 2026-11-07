@@ -42,6 +42,12 @@ enum Command {
         /// Ask the configured LLM for a typed action from every resident each hour.
         #[arg(long)]
         inference: bool,
+        /// Periodically narrate recent resident activity and major world changes.
+        #[arg(long)]
+        storyteller: bool,
+        /// Virtual-hour interval between storyteller summaries.
+        #[arg(long, default_value_t = 6, value_parser = clap::value_parser!(u64).range(1..=8760))]
+        storyteller_interval: u64,
         /// Inference provider settings (default: local LM Studio).
         #[command(flatten)]
         provider: ProviderOptions,
@@ -143,6 +149,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             hours,
             quiet,
             inference,
+            storyteller,
+            storyteller_interval,
             provider: provider_options,
         } => {
             let store = Store::open(&world).await?;
@@ -173,13 +181,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
             }
-            let reports = if inference {
+            let (reports, stories) = if inference || storyteller {
                 let provider = provider_options.create()?;
-                agent::run_with_inference(&mut village, &store, hours, quiet, &provider).await?
+                let result = agent::run(
+                    &mut village,
+                    &store,
+                    hours,
+                    quiet,
+                    inference,
+                    storyteller,
+                    storyteller_interval,
+                    &provider,
+                )
+                .await?;
+                (result.reports, result.stories)
             } else {
-                village
+                let reports = village
                     .run_for(hours)
-                    .map_err(|error| format!("simulation stopped: {error:?}"))?
+                    .map_err(|error| format!("simulation stopped: {error:?}"))?;
+                (reports, Vec::new())
             };
             let action_count: usize = reports.iter().map(|report| report.actions.len()).sum();
             if !quiet {
@@ -190,6 +210,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             println!("  {action}");
                         }
                     }
+                    for (hour, story) in stories.iter().filter(|(hour, _)| *hour == report.time.0) {
+                        println!("\nStory through virtual hour {hour}:\n{story}");
+                    }
+                }
+            } else {
+                for (hour, story) in &stories {
+                    println!("\nStory through virtual hour {hour}:\n{story}");
                 }
             }
             store.save(&village).await?;

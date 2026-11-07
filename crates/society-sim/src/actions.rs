@@ -64,7 +64,7 @@ impl Village {
             if let WorldEvent::ActionCommitted { action, .. } = event {
                 report
                     .actions
-                    .push(format!("{}: {action:?}", resident.name));
+                    .push(format!("{}: {}", resident.name, action_label(&action)));
             }
         }
         Ok(report)
@@ -494,5 +494,38 @@ impl Village {
             resident: proposal.resident,
             action: proposal.action,
         }
+    }
+}
+
+fn action_label(action: &Action) -> &'static str {
+    match action {
+        Action::MoveTo { .. } | Action::Move { .. } => "moves",
+        Action::Observe => "observes",
+        Action::Speak { .. } => "speaks",
+        Action::Eat | Action::EatResource { .. } => "eats",
+        Action::Drink { .. } => "drinks",
+        Action::Rest { .. } => "rests",
+        Action::Forage { .. } | Action::Gather { .. } | Action::Harvest { .. } => {
+            "gathers food or materials"
+        }
+        Action::Craft { .. } | Action::CraftItem { .. } => "crafts",
+        Action::Work { .. } => "works",
+        Action::Hunt { .. } => "hunts",
+        Action::Fish { .. } => "fishes",
+        Action::Build { .. } => "builds",
+        Action::Destroy { .. } => "alters the landscape",
+        Action::Dig { .. } => "digs",
+        Action::Plant { .. } => "plants",
+        Action::ShareResource { .. } => "shares resources",
+        Action::Play { .. } => "plays",
+        Action::SetGoal { .. } => "sets a personal goal",
+        Action::Invent { .. } => "experiments with an invention",
+        Action::ProposeCapability { .. } => "proposes a new capability",
+        Action::VoteCapability { .. } => "votes on a capability",
+        Action::OfferTrade { .. } => "offers a trade",
+        Action::AcceptTrade { .. } => "accepts a trade",
+        Action::StartProject { .. } => "starts a project",
+        Action::ContinueProject { .. } => "continues a project",
+        Action::CancelProject { .. } => "cancels a project",
     }
 }

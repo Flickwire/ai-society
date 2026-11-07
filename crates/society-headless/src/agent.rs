@@ -1,96 +1,143 @@
 //! LLM action loop, output validation, and deterministic fallback behavior.
 
 mod perception;
+mod storyteller;
 
 use society_domain::{Action, ActionProposal, WorldEvent};
 use society_inference::InferenceProvider;
 use society_sim::{Resident, Village};
 use society_storage::Store;
 
-pub(super) async fn run_with_inference(
+pub(super) struct RunResult {
+    pub reports: Vec<society_sim::TickReport>,
+    pub stories: Vec<(u64, String)>,
+}
+
+pub(super) async fn run(
     village: &mut Village,
     store: &Store,
     hours: u64,
     quiet: bool,
+    use_inference: bool,
+    use_storyteller: bool,
+    storyteller_interval: u64,
     provider: &impl InferenceProvider,
-) -> Result<Vec<society_sim::TickReport>, Box<dyn std::error::Error>> {
+) -> Result<RunResult, Box<dyn std::error::Error>> {
     let mut reports = Vec::with_capacity(usize::try_from(hours).unwrap_or(0));
     let mut provider_available = true;
-    for _ in 0..hours {
-        let mut report = village
-            .advance_for_decisions()
-            .map_err(|error| format!("simulation stopped: {error:?}"))?;
-        let resident_ids: Vec<_> = village
-            .residents()
-            .iter()
-            .map(|resident| resident.id)
-            .collect();
-        for resident_id in resident_ids {
-            let resident = village
+    let mut storyteller_available = use_storyteller;
+    let mut period_start = village.snapshot();
+    let mut period_reports = Vec::new();
+    let mut stories = Vec::new();
+    let mut next_story_at = village.now().0.saturating_add(storyteller_interval.max(1));
+
+    for completed_hours in 0..hours {
+        let mut report = if use_inference {
+            village
+                .advance_for_decisions()
+                .map_err(|error| format!("simulation stopped: {error:?}"))?
+        } else {
+            village
+                .tick()
+                .map_err(|error| format!("simulation stopped: {error:?}"))?
+        };
+        if use_inference {
+            let resident_ids: Vec<_> = village
                 .residents()
                 .iter()
-                .find(|resident| resident.id == resident_id)
-                .cloned()
-                .expect("resident IDs came from the current village");
-            let expected_version = village.version();
-            let action = if provider_available {
-                match perception::request_resident_action(provider, village, &resident).await {
-                    Ok(decision) => {
-                        if !quiet && !decision.queries.is_empty() {
-                            eprintln!(
-                                "{} asked the simulator for: {}",
-                                resident.name,
-                                decision.queries.join(", ")
-                            );
+                .map(|resident| resident.id)
+                .collect();
+            for resident_id in resident_ids {
+                let resident = village
+                    .residents()
+                    .iter()
+                    .find(|resident| resident.id == resident_id)
+                    .cloned()
+                    .expect("resident IDs came from the current village");
+                let expected_version = village.version();
+                let action = if provider_available {
+                    match perception::request_resident_action(provider, village, &resident).await {
+                        Ok(decision) => {
+                            if !quiet && !decision.queries.is_empty() {
+                                eprintln!(
+                                    "{} asked the simulator for: {}",
+                                    resident.name,
+                                    decision.queries.join(", ")
+                                );
+                            }
+                            decision.action
                         }
-                        decision.action
-                    }
-                    Err(error) => {
-                        if !quiet {
-                            eprintln!(
-                                "{} inference failed ({error}); using safe fallback for the rest of this run",
-                                resident.name
-                            );
+                        Err(error) => {
+                            if !quiet {
+                                eprintln!(
+                                    "{} inference failed ({error}); using safe fallback for the rest of this run",
+                                    resident.name
+                                );
+                            }
+                            provider_available = false;
+                            fallback_action(village, &resident)
                         }
-                        provider_available = false;
-                        fallback_action(village, &resident)
                     }
-                }
-            } else {
-                fallback_action(village, &resident)
-            };
-            let proposal = ActionProposal {
-                resident: resident.id,
-                expected_version,
-                idempotency_key: format!("inference-{}-{}", resident.id.0, report.time.0),
-                action,
-            };
-            let mut event = village.apply(proposal);
-            if matches!(event, WorldEvent::ActionRejected { .. }) {
-                if !quiet {
-                    eprintln!(
-                        "{} proposed an invalid action; using safe fallback",
-                        resident.name
-                    );
-                }
-                let fallback = ActionProposal {
-                    resident: resident.id,
-                    expected_version: village.version(),
-                    idempotency_key: format!("fallback-{}-{}", resident.id.0, report.time.0),
-                    action: fallback_action(village, &resident),
+                } else {
+                    fallback_action(village, &resident)
                 };
-                event = village.apply(fallback);
-            }
-            if let WorldEvent::ActionCommitted { action, .. } = event {
-                report
-                    .actions
-                    .push(format!("{}: {}", resident.name, action_name(&action)));
+                let proposal = ActionProposal {
+                    resident: resident.id,
+                    expected_version,
+                    idempotency_key: format!("inference-{}-{}", resident.id.0, report.time.0),
+                    action,
+                };
+                let mut event = village.apply(proposal);
+                if matches!(event, WorldEvent::ActionRejected { .. }) {
+                    if !quiet {
+                        eprintln!(
+                            "{} proposed an invalid action; using safe fallback",
+                            resident.name
+                        );
+                    }
+                    let fallback = ActionProposal {
+                        resident: resident.id,
+                        expected_version: village.version(),
+                        idempotency_key: format!("fallback-{}-{}", resident.id.0, report.time.0),
+                        action: fallback_action(village, &resident),
+                    };
+                    event = village.apply(fallback);
+                }
+                if let WorldEvent::ActionCommitted { action, .. } = event {
+                    report
+                        .actions
+                        .push(format!("{}: {}", resident.name, action_name(&action)));
+                }
             }
         }
         store.save(village).await?;
+        period_reports.push(report.clone());
         reports.push(report);
+
+        let final_hour = completed_hours + 1 == hours;
+        if storyteller_available && (village.now().0 >= next_story_at || final_hour) {
+            match storyteller::summarize_period(
+                provider,
+                &period_reports,
+                &period_start,
+                &village.snapshot(),
+            )
+            .await
+            {
+                Ok(summary) => {
+                    stories.push((village.now().0, summary));
+                }
+                Err(error) => {
+                    eprintln!("Storyteller failed ({error}); disabling narration for this run.");
+                    storyteller_available = false;
+                }
+            }
+            period_reports.clear();
+            period_start = village.snapshot();
+            next_story_at = village.now().0.saturating_add(storyteller_interval.max(1));
+        }
     }
-    Ok(reports)
+    Ok(RunResult { reports, stories })
 }
 
 fn validate_agent_action(action: Action) -> Result<Action, Box<dyn std::error::Error>> {
