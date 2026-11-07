@@ -90,7 +90,7 @@ must not be embedded in the URL. `AI_SOCIETY_BASE_URL`, `AI_SOCIETY_MODEL`, and
 `AI_SOCIETY_API_KEY` can configure defaults; `AI_SOCIETY_API_KEY_ENV` can change
 the key variable name. With `--inference`, a resident first requests specific
 read-only state (such as inventory, nearby objects, a memory search, attitudes,
-people, or conversations), then chooses an action from the returned subset. It
+people, conversations, or their own durable notes), then chooses an action from the returned subset. They can keep, review, revise, and delete their notes; these notes are distinct from fallible memories and do not decay. It
 can make up to two follow-up query rounds. The compact prompt always includes
 identity, position, immediate needs, and personal traits; other state is only
 included when queried. Query categories are logged during non-quiet runs.

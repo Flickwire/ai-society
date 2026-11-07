@@ -5,6 +5,7 @@ use super::clock::ClockError;
 use super::inner_life::{
     decay_memories, evolve_from_action, record_action_memories, update_body_from_needs,
 };
+use super::personal::PersonalNote;
 use super::rules::*;
 use super::types::*;
 use super::village::{TickReport, Village};
@@ -404,6 +405,34 @@ impl Village {
                     .saturating_sub(u8::try_from(duration.saturating_mul(2)).unwrap_or(u8::MAX));
             }
             Action::SetGoal { goal } => self.residents[index].goal = goal.trim().to_owned(),
+            Action::KeepNote { text } => {
+                let notes = &mut self.residents[index].notes;
+                let id = notes
+                    .iter()
+                    .map(|note| note.id)
+                    .max()
+                    .unwrap_or(0)
+                    .saturating_add(1);
+                notes.push(PersonalNote {
+                    id,
+                    text: text.trim().to_owned(),
+                    created_at: event_time,
+                    updated_at: event_time,
+                });
+            }
+            Action::UpdateNote { note, text } => {
+                if let Some(entry) = self.residents[index]
+                    .notes
+                    .iter_mut()
+                    .find(|entry| entry.id == *note)
+                {
+                    entry.text = text.trim().to_owned();
+                    entry.updated_at = event_time;
+                }
+            }
+            Action::DeleteNote { note } => self.residents[index]
+                .notes
+                .retain(|entry| entry.id != *note),
             Action::Invent {
                 name,
                 description,
@@ -519,6 +548,9 @@ fn action_label(action: &Action) -> &'static str {
         Action::ShareResource { .. } => "shares resources",
         Action::Play { .. } => "plays",
         Action::SetGoal { .. } => "sets a personal goal",
+        Action::KeepNote { .. } => "keeps a note",
+        Action::UpdateNote { .. } => "updates a note",
+        Action::DeleteNote { .. } => "deletes a note",
         Action::Invent { .. } => "experiments with an invention",
         Action::ProposeCapability { .. } => "proposes a new capability",
         Action::VoteCapability { .. } => "votes on a capability",

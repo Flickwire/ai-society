@@ -112,6 +112,9 @@ boundary, even when the prompt tells the model those same rules.
   each virtual hour. Significance and relevance slow decay; confidence is
   subjective certainty, not verified accuracy. Personal impressions of other
   residents form through interaction and can shift in either direction.
+- Resident-authored `PersonalNote`s are durable and distinct from decaying
+  event memories. Note CRUD is expressed as typed actions; notes are private
+  and exposed only by the bounded `notes` perception query.
 - Inference perception always starts with position, immediate needs, and
   individual traits. Every other state detail must be requested through the
   bounded query allowlist. Keep queries read-only, cap their result counts, and

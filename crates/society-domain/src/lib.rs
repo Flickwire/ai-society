@@ -318,6 +318,23 @@ pub enum Action {
         /// Short natural-language goal.
         goal: String,
     },
+    /// Keep a durable personal note that is not subject to memory decay.
+    KeepNote {
+        /// Note text (up to 500 bytes).
+        text: String,
+    },
+    /// Revise one of the resident's durable personal notes.
+    UpdateNote {
+        /// Note identifier returned by the notes query.
+        note: u64,
+        /// Replacement text (up to 500 bytes).
+        text: String,
+    },
+    /// Remove one of the resident's durable personal notes.
+    DeleteNote {
+        /// Note identifier returned by the notes query.
+        note: u64,
+    },
     /// Record an invention by combining known materials and proposing a use.
     Invent {
         /// Invention name.

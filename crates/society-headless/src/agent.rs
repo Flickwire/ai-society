@@ -161,6 +161,9 @@ fn validate_agent_action(action: Action) -> Result<Action, Box<dyn std::error::E
         | Action::ShareResource { .. }
         | Action::Play { .. }
         | Action::SetGoal { .. }
+        | Action::KeepNote { .. }
+        | Action::UpdateNote { .. }
+        | Action::DeleteNote { .. }
         | Action::Invent { .. }
         | Action::ProposeCapability { .. }
         | Action::VoteCapability { .. }
@@ -286,6 +289,9 @@ fn action_name(action: &Action) -> &'static str {
         Action::ShareResource { .. } => "shares resources",
         Action::Play { .. } => "plays",
         Action::SetGoal { .. } => "sets a goal",
+        Action::KeepNote { .. } => "keeps a note",
+        Action::UpdateNote { .. } => "updates a note",
+        Action::DeleteNote { .. } => "deletes a note",
         Action::Invent { .. } => "invents",
         Action::ProposeCapability { .. } => "requests a new capability",
         Action::VoteCapability { .. } => "votes on a capability",

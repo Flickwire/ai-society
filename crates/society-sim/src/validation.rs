@@ -191,6 +191,24 @@ impl Village {
                     })
             }
             Action::SetGoal { goal } => !goal.trim().is_empty() && goal.len() <= 120,
+            Action::KeepNote { text } => {
+                !text.trim().is_empty()
+                    && text.len() <= 500
+                    && resident.notes.len() < 100
+                    && resident
+                        .notes
+                        .iter()
+                        .map(|entry| entry.id)
+                        .max()
+                        .unwrap_or(0)
+                        < u64::MAX
+            }
+            Action::UpdateNote { note, text } => {
+                !text.trim().is_empty()
+                    && text.len() <= 500
+                    && resident.notes.iter().any(|entry| entry.id == *note)
+            }
+            Action::DeleteNote { note } => resident.notes.iter().any(|entry| entry.id == *note),
             Action::Invent {
                 name,
                 description,

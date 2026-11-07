@@ -12,7 +12,8 @@ mod village;
 
 pub use clock::{ClockError, Scheduled, SimulationClock};
 pub use personal::{
-    AttitudeKind, MemorySource, PersonalAttitude, PersonalMemory, Personality, PhysicalProfile,
+    AttitudeKind, MemorySource, PersonalAttitude, PersonalMemory, PersonalNote, Personality,
+    PhysicalProfile,
 };
 pub use types::{
     CapabilityRequest, CapabilityStatus, CapabilityVote, ConversationLine, Invention, Place,

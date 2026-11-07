@@ -36,6 +36,11 @@ pub(super) enum StateQuestion {
         #[serde(default = "default_memory_limit")]
         limit: u8,
     },
+    /// Review durable notes the resident chose to keep.
+    Notes {
+        #[serde(default = "default_note_limit")]
+        limit: u8,
+    },
     /// Inspect private beliefs, opinions, preferences, or impressions.
     Attitudes {
         topic: Option<String>,
@@ -83,6 +88,9 @@ fn default_object_limit() -> u8 {
 }
 fn default_memory_limit() -> u8 {
     4
+}
+fn default_note_limit() -> u8 {
+    8
 }
 fn default_attitude_limit() -> u8 {
     6
@@ -145,6 +153,7 @@ fn normalize_question(question: &mut StateQuestion) {
             text(query);
             limit(count, 6);
         }
+        StateQuestion::Notes { limit: count } => limit(count, 12),
         StateQuestion::Attitudes {
             topic,
             about: _,

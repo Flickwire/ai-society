@@ -29,6 +29,19 @@ pub(super) fn answer_questions(
                 about,
                 format_memories(resident, query.as_deref(), about, limit)
             ),
+            StateQuestion::Notes { limit } => format!(
+                "Your durable notes: {}",
+                resident
+                    .notes
+                    .iter()
+                    .take(usize::from(limit))
+                    .map(|note| format!(
+                        "#{} (written {}, updated {}): {}",
+                        note.id, note.created_at.0, note.updated_at.0, note.text
+                    ))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            ),
             StateQuestion::Attitudes {
                 topic,
                 about,
@@ -379,9 +392,9 @@ fn format_places(village: &Village, resident: &Resident, query: Option<&str>, li
 }
 
 pub(super) fn supported_action_schema() -> &'static str {
-    "move_to(destination:{x,y,z}), observe, speak(to,text), eat, eat_resource(food,amount), rest(duration), gather(target,amount), drink(source), hunt(target), fish(target,amount), build(structure,position), destroy(target), dig(position), plant(seed,position), harvest(target,amount), craft_item(recipe), share_resource(to,resource,amount), play(activity,participants,duration), set_goal(goal), invent(name,description,materials), propose_capability(name,description,example), vote_capability(proposal,support). Structures: lean_to, fire_pit, storage_rack, workbench, garden, fence, raft. Recipes: stone_axe, spear, rope, basket, net. Resources: wood, stone, fiber, clay, grain, berries, grain_seed, berry_seed, meat, fish."
+    "move_to(destination:{x,y,z}), observe, speak(to,text), eat, eat_resource(food,amount), rest(duration), gather(target,amount), drink(source), hunt(target), fish(target,amount), build(structure,position), destroy(target), dig(position), plant(seed,position), harvest(target,amount), craft_item(recipe), share_resource(to,resource,amount), play(activity,participants,duration), set_goal(goal), keep_note(text), update_note(note,text), delete_note(note), invent(name,description,materials), propose_capability(name,description,example), vote_capability(proposal,support). Notes are durable private notes you choose to keep; ask for notes before editing or deleting by ID. Structures: lean_to, fire_pit, storage_rack, workbench, garden, fence, raft. Recipes: stone_axe, spear, rope, basket, net. Resources: wood, stone, fiber, clay, grain, berries, grain_seed, berry_seed, meat, fish."
 }
 
 pub(super) fn supported_query_schema() -> &'static str {
-    "{\"kind\":\"inventory\"}; {\"kind\":\"nearby_objects\",\"radius\":8,\"limit\":6}; {\"kind\":\"memories\",\"query\":\"...\",\"limit\":4} (optional numeric about); {\"kind\":\"attitudes\",\"topic\":\"...\",\"limit\":6} (optional numeric about); {\"kind\":\"nearby_people\",\"radius\":8,\"limit\":6}; {\"kind\":\"conversations\",\"limit\":4} (optional numeric with); {\"kind\":\"open_capability_requests\",\"limit\":4}; {\"kind\":\"inventions\",\"query\":\"...\",\"limit\":4}; {\"kind\":\"places\",\"query\":\"...\",\"limit\":4}"
+    "{\"kind\":\"inventory\"}; {\"kind\":\"nearby_objects\",\"radius\":8,\"limit\":6}; {\"kind\":\"memories\",\"query\":\"...\",\"limit\":4} (optional numeric about); {\"kind\":\"notes\",\"limit\":8}; {\"kind\":\"attitudes\",\"topic\":\"...\",\"limit\":6} (optional numeric about); {\"kind\":\"nearby_people\",\"radius\":8,\"limit\":6}; {\"kind\":\"conversations\",\"limit\":4} (optional numeric with); {\"kind\":\"open_capability_requests\",\"limit\":4}; {\"kind\":\"inventions\",\"query\":\"...\",\"limit\":4}; {\"kind\":\"places\",\"query\":\"...\",\"limit\":4}"
 }

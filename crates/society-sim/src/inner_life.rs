@@ -436,6 +436,9 @@ fn describe_action(action: &Action) -> String {
         }
         Action::Play { activity, .. } => format!("take part in {activity}"),
         Action::SetGoal { goal } => format!("choose the goal {goal}"),
+        Action::KeepNote { .. } => "keep a personal note".to_owned(),
+        Action::UpdateNote { .. } => "update a personal note".to_owned(),
+        Action::DeleteNote { .. } => "delete a personal note".to_owned(),
         Action::Invent { name, .. } => format!("experiment with the idea {name}"),
         Action::ProposeCapability { name, .. } => format!("request the new activity {name}"),
         Action::VoteCapability { proposal, support } => format!(

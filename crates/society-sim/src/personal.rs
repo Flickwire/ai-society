@@ -123,3 +123,16 @@ pub struct PersonalMemory {
     /// Emotional tone from -100 (very negative) to 100 (very positive).
     pub emotional_tone: i8,
 }
+
+/// A resident-authored durable note, separate from fallible event memories.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PersonalNote {
+    /// Stable identifier within this resident's notes.
+    pub id: u64,
+    /// Note contents authored by the resident.
+    pub text: String,
+    /// Virtual hour the note was created.
+    pub created_at: VirtualTime,
+    /// Virtual hour the note was last revised.
+    pub updated_at: VirtualTime,
+}

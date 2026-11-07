@@ -131,6 +131,7 @@ impl Village {
                     physical: initial_physical(index as u64 + 1),
                     personality: initial_personality(index as u64 + 1),
                     memories: Vec::new(),
+                    notes: Vec::new(),
                     attitudes: initial_attitudes(index as u64 + 1),
                     learning_experience: 0,
                 }
@@ -247,6 +248,17 @@ impl Village {
                         || attitude
                             .target
                             .is_some_and(|id| !resident_ids.contains(&id))
+                })
+                || resident.notes.len() > 100
+                || resident.notes.iter().enumerate().any(|(index, note)| {
+                    note.id == 0
+                        || note.text.trim().is_empty()
+                        || note.text.len() > 500
+                        || note.created_at > note.updated_at
+                        || note.updated_at > snapshot.clock.now()
+                        || resident.notes[..index]
+                            .iter()
+                            .any(|prior| prior.id == note.id)
                 })
         }) {
             return Err(SnapshotError::InvalidResidentState);

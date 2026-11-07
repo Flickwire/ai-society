@@ -1,6 +1,8 @@
 //! Shared world entities and wilderness bootstrap data.
 
-use super::personal::{PersonalAttitude, PersonalMemory, Personality, PhysicalProfile};
+use super::personal::{
+    PersonalAttitude, PersonalMemory, PersonalNote, Personality, PhysicalProfile,
+};
 use serde::{Deserialize, Serialize};
 use society_domain::{
     CapabilityProposalId, PlaceId, Position, ResidentId, ResourceAmount, ResourceKind,
@@ -65,6 +67,9 @@ pub struct Resident {
     /// Private recollections; these may be incomplete, distorted, or mistaken.
     #[serde(default)]
     pub memories: Vec<PersonalMemory>,
+    /// Resident-authored durable notes, kept distinct from decaying recollections.
+    #[serde(default)]
+    pub notes: Vec<PersonalNote>,
     /// Private, revisable views and preferences, including impressions of people.
     #[serde(default)]
     pub attitudes: Vec<PersonalAttitude>,
