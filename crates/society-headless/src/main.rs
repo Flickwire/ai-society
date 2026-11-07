@@ -399,7 +399,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         max_tokens: 512,
                         temperature: 0.7,
                         response_format: None,
-                        reasoning_effort: Some("low".to_owned()),
+                        reasoning_effort: Some("none".to_owned()),
                     })
                     .await?;
                 println!("{}", response.content);

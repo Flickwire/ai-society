@@ -34,7 +34,7 @@ crates/
   society-inference/    # OpenAI-compatible provider and protocol types
   society-storage/     # SQLite WAL snapshots
   society-headless/    # CLI entry point and agent decision loop
-    src/agent.rs        # prompt context, action parsing and safe fallback
+    src/agent.rs        # prompt context, action parsing and fail-closed errors
   migrations/           # SQLite schema
 assets/
 migrations/
@@ -95,8 +95,9 @@ can make up to two follow-up query rounds. The compact prompt always includes
 identity, position, immediate needs, and personal traits; other state is only
 included when queried. Query categories are logged during non-quiet runs.
 Outputs are parsed as typed actions and validated by the simulation;
-connection failures, malformed outputs, and invalid actions use a safe
-deterministic fallback. Residents cannot add
+truncated responses are retried with a bounded, increasing output budget.
+If inference fails or an action is rejected, the run stops with an error and
+does not substitute deterministic actions. Residents cannot add
 executable behavior themselves: an unavailable action is recorded as a
 capability request, and a majority vote marks it accepted or declined for
 future implementation. The world is currently a bounded discrete grid (x/z

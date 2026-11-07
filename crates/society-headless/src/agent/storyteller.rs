@@ -47,7 +47,7 @@ pub(super) async fn summarize_period(
             max_tokens: 256,
             temperature: 0.5,
             response_format: None,
-            reasoning_effort: Some("low".to_owned()),
+            reasoning_effort: Some("none".to_owned()),
         })
         .await?;
     let summary = response

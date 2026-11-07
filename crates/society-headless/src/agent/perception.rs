@@ -29,19 +29,18 @@ pub(super) async fn request_resident_action(
                 ChatMessage::new(
                     "system",
                     format!(
-                        "Before deciding, ask the simulator only for facts you need. Return {{\"type\":\"query\",\"questions\":[...]}}. Do not choose an action yet. Query objects use these exact schemas: {}. You may ask an empty list. Queries are read-only and bounded; memories and attitudes are private to you.",
+                        "Before deciding, ask the simulator only for facts you need. Return JSON exactly shaped like {{\"type\":\"query\",\"questions\":[{{\"kind\":\"inventory\"}}]}}. Every questions entry MUST be a JSON object with a kind from these exact schemas; never write a question as a string. Do not choose an action yet. You may ask an empty list. Queries are read-only and bounded; memories and attitudes are private to you. Supported query objects: {}.",
                         supported_query_schema()
                     ),
                 ),
                 ChatMessage::new("user", baseline.clone()),
             ],
-            // Reasoning models may spend several hundred tokens thinking before
-            // emitting the required JSON. Keep a generous cap so that the final
-            // answer is not truncated into an empty `content` field.
+            // The provider adaptively retries responses stopped by its token
+            // limit, up to a bounded ceiling.
             max_tokens: 2_048,
             temperature: 0.1,
             response_format: None,
-            reasoning_effort: Some("low".to_owned()),
+            reasoning_effort: Some("none".to_owned()),
         })
         .await?;
     let mut questions = match parse_turn(&first.content)? {
@@ -112,7 +111,7 @@ async fn ask_next_step(
     may_query: bool,
 ) -> Result<society_inference::ChatResponse, Box<dyn std::error::Error>> {
     let instruction = if may_query {
-        "You have received only the facts you requested. Either request another necessary fact with {\"type\":\"query\",\"questions\":[...]}, or choose one action with {\"type\":\"action\",\"action\":{...}}. Ask only questions that could change your decision."
+        "You have received only the facts you requested. Either request another necessary fact with {\"type\":\"query\",\"questions\":[...]}, or choose one action with {\"type\":\"action\",\"action\":{\"type\":\"observe\"}}. The outer type must be query or action; for actions, the nested action object must also have its own type field, such as {\"type\":\"gather\",\"target\":1,\"amount\":1}. Ask only questions that could change your decision."
     } else {
         "You have received the facts you requested. Choose one action now with {\"type\":\"action\",\"action\":{...}}. Do not request more context."
     };
@@ -136,7 +135,7 @@ async fn ask_next_step(
             max_tokens: 2_048,
             temperature: 0.2,
             response_format: None,
-            reasoning_effort: Some("low".to_owned()),
+            reasoning_effort: Some("none".to_owned()),
         })
         .await
         .map_err(Into::into)
@@ -153,7 +152,7 @@ async fn ask_for_action(
                 ChatMessage::new(
                     "system",
                     format!(
-                        "Choose one immediate action. You cannot ask more questions. Return {{\"type\":\"action\",\"action\":<typed action>}} as JSON only. Supported actions: {}. Use exact resource, structure, recipe, and resident IDs from requested state. If unsure, observe.",
+                        "Choose one immediate action. You cannot ask more questions. Return JSON with both levels typed: {{\"type\":\"action\",\"action\":{{\"type\":\"observe\"}}}}. The nested action object must have its own type field naming the action variant. Supported actions: {}. Use exact resource, structure, recipe, and resident IDs from requested state. If unsure, observe.",
                         supported_action_schema()
                     ),
                 ),
@@ -162,7 +161,7 @@ async fn ask_for_action(
             max_tokens: 2_048,
             temperature: 0.2,
             response_format: None,
-            reasoning_effort: Some("low".to_owned()),
+            reasoning_effort: Some("none".to_owned()),
         })
         .await
         .map_err(Into::into)
@@ -211,5 +210,60 @@ fn parse_turn(content: &str) -> Result<InferenceTurn, Box<dyn std::error::Error>
     if json.is_empty() {
         return Err("provider returned an empty query/action response".into());
     }
-    Ok(serde_json::from_str(json)?)
+    let mut value: serde_json::Value = serde_json::from_str(json)?;
+    if let Some(object) = value.as_object_mut()
+        && !object.contains_key("type")
+    {
+        if object.contains_key("questions") {
+            object.insert(
+                "type".to_owned(),
+                serde_json::Value::String("query".to_owned()),
+            );
+        } else if object.contains_key("action") {
+            object.insert(
+                "type".to_owned(),
+                serde_json::Value::String("action".to_owned()),
+            );
+        }
+    }
+    if value.get("type").and_then(serde_json::Value::as_str) == Some("action")
+        && let Some(action) = value
+            .get_mut("action")
+            .and_then(serde_json::Value::as_object_mut)
+        && !action.contains_key("type")
+        && let Some(action_type) = ["name", "kind", "action"]
+            .iter()
+            .find_map(|key| action.get(*key).and_then(serde_json::Value::as_str))
+    {
+        action.insert(
+            "type".to_owned(),
+            serde_json::Value::String(action_type.to_ascii_lowercase()),
+        );
+    }
+    let fields = value.as_object().map_or_else(
+        || "non-object JSON".to_owned(),
+        |object| {
+            let root_type = object
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("missing");
+            let action_shape = object
+                .get("action")
+                .map(|action| match action {
+                    serde_json::Value::Object(action) => {
+                        format!(
+                            "action fields: {}",
+                            action.keys().cloned().collect::<Vec<_>>().join(", ")
+                        )
+                    }
+                    serde_json::Value::String(_) => "action is a string".to_owned(),
+                    _ => "action has another JSON shape".to_owned(),
+                })
+                .unwrap_or_default();
+            format!("root type: {root_type}; {action_shape}")
+        },
+    );
+    serde_json::from_value(value).map_err(|error| {
+        format!("could not parse query/action JSON ({error}); response fields: {fields}").into()
+    })
 }

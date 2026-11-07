@@ -106,7 +106,7 @@ Baseline before tuning: 8 agents × 8 decisions/virtual hour × 2K input/300 out
 
 1. **Foundation (2–4 evenings):** Cargo workspace, CI, strict lint, domain actions/events, schema migrations, minimal headless binary. Gate: clean build/test on target OS; no JS toolchain.
 2. **Simulation (weeks 1–2):** seeded town, eight residents, needs, navigation, resources, work/rest/eat actions, event store, snapshots. Gate: 30 deterministic virtual days with conservation/property tests.
-3. **Inference (week 3):** llama.cpp local endpoint, Rust adapter, schema-validation, event wake-ups, budget/fallback behavior. Gate: 24 simulated hours; malformed outputs cannot alter world; model benchmarks recorded.
+3. **Inference (week 3):** local OpenAI-compatible endpoint, Rust adapter, schema validation, bounded output retries, fail-closed action errors. Gate: 24 simulated hours; malformed outputs cannot alter world; model benchmarks recorded.
 4. **Society (weeks 4–5):** persistent memory, FTS, conversation, goals, relationships, trades, reflection. Gate: after restart an agent recalls a person, completes a multi-step task and atomic trade; no private-memory leaks.
 5. **Bevy app (week 6):** town renderer, controls, inspector, replay. Gate: GUI and headless share identical state transitions; GUI restart safe.
 6. **Optimization (week 7):** adaptive acceleration, profiling, WAL recovery, queue stress, memory and VRAM limits. Gate: seven virtual days unattended with zero integrity failures and measured acceleration.

@@ -170,7 +170,8 @@ pub(super) fn decay_memories(residents: &mut [Resident], now: VirtualTime) {
                 .unwrap_or(0);
             let current_relevance =
                 (25 + u8::from(related_goal) * 35 + attitude_relevance / 2).min(100);
-            memory.relevance = (memory.relevance.saturating_mul(3) + current_relevance) / 4;
+            memory.relevance =
+                ((u16::from(memory.relevance) * 3 + u16::from(current_relevance)) / 4) as u8;
             let decay = 1
                 + u16::from(100 - memory.significance) / 20
                 + u16::from(100 - memory.relevance) / 20;

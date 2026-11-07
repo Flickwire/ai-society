@@ -1,11 +1,11 @@
-//! LLM action loop, output validation, and deterministic fallback behavior.
+//! LLM action loop, output validation, and fail-closed inference behavior.
 
 mod perception;
 mod storyteller;
 
 use society_domain::{Action, ActionProposal, WorldEvent};
 use society_inference::InferenceProvider;
-use society_sim::{Resident, Village};
+use society_sim::Village;
 use society_storage::Store;
 
 pub(super) struct RunResult {
@@ -24,7 +24,6 @@ pub(super) async fn run(
     provider: &impl InferenceProvider,
 ) -> Result<RunResult, Box<dyn std::error::Error>> {
     let mut reports = Vec::with_capacity(usize::try_from(hours).unwrap_or(0));
-    let mut provider_available = true;
     let mut storyteller_available = use_storyteller;
     let mut period_start = village.snapshot();
     let mut period_reports = Vec::new();
@@ -55,58 +54,40 @@ pub(super) async fn run(
                     .cloned()
                     .expect("resident IDs came from the current village");
                 let expected_version = village.version();
-                let action = if provider_available {
-                    match perception::request_resident_action(provider, village, &resident).await {
-                        Ok(decision) => {
-                            if !quiet && !decision.queries.is_empty() {
-                                eprintln!(
-                                    "{} asked the simulator for: {}",
-                                    resident.name,
-                                    decision.queries.join(", ")
-                                );
-                            }
-                            decision.action
-                        }
-                        Err(error) => {
-                            if !quiet {
-                                eprintln!(
-                                    "{} inference failed ({error}); using safe fallback for the rest of this run",
-                                    resident.name
-                                );
-                            }
-                            provider_available = false;
-                            fallback_action(village, &resident)
-                        }
-                    }
-                } else {
-                    fallback_action(village, &resident)
-                };
+                let decision = perception::request_resident_action(provider, village, &resident)
+                    .await
+                    .map_err(|error| {
+                        format!(
+                            "{} inference failed ({error}); simulation stopped without deterministic fallback",
+                            resident.name
+                        )
+                    })?;
+                if !quiet && !decision.queries.is_empty() {
+                    eprintln!(
+                        "{} asked the simulator for: {}",
+                        resident.name,
+                        decision.queries.join(", ")
+                    );
+                }
                 let proposal = ActionProposal {
                     resident: resident.id,
                     expected_version,
                     idempotency_key: format!("inference-{}-{}", resident.id.0, report.time.0),
-                    action,
+                    action: decision.action,
                 };
-                let mut event = village.apply(proposal);
-                if matches!(event, WorldEvent::ActionRejected { .. }) {
-                    if !quiet {
-                        eprintln!(
-                            "{} proposed an invalid action; using safe fallback",
-                            resident.name
-                        );
+                match village.apply(proposal) {
+                    WorldEvent::ActionCommitted { action, .. } => {
+                        report
+                            .actions
+                            .push(format!("{}: {}", resident.name, action_name(&action)))
                     }
-                    let fallback = ActionProposal {
-                        resident: resident.id,
-                        expected_version: village.version(),
-                        idempotency_key: format!("fallback-{}-{}", resident.id.0, report.time.0),
-                        action: fallback_action(village, &resident),
-                    };
-                    event = village.apply(fallback);
-                }
-                if let WorldEvent::ActionCommitted { action, .. } = event {
-                    report
-                        .actions
-                        .push(format!("{}: {}", resident.name, action_name(&action)));
+                    WorldEvent::ActionRejected { reason, .. } => {
+                        return Err(format!(
+                            "{} action rejected ({reason:?}); simulation stopped without deterministic fallback",
+                            resident.name
+                        )
+                        .into());
+                    }
                 }
             }
         }
@@ -179,84 +160,6 @@ fn validate_agent_action(action: Action) -> Result<Action, Box<dyn std::error::E
             Err("that action type is not implemented yet; request it as a capability".into())
         }
     }
-}
-
-fn fallback_action(village: &Village, resident: &Resident) -> Action {
-    if resident.hunger >= 65
-        && (resident.food > 0
-            || resident.inventory.iter().any(|(item, amount)| {
-                *amount > 0
-                    && matches!(
-                        item,
-                        society_domain::ResourceKind::Berries
-                            | society_domain::ResourceKind::Grain
-                            | society_domain::ResourceKind::Meat
-                            | society_domain::ResourceKind::Fish
-                    )
-            }))
-    {
-        Action::Eat
-    } else if resident.thirst >= 60 {
-        if let Some(water) = village.world_objects().iter().find(|object| {
-            object.kind == society_sim::WorldObjectKind::WaterSource
-                && resident.position.distance(object.position) <= 1
-        }) {
-            Action::Drink { source: water.id }
-        } else if let Some(water) = village
-            .world_objects()
-            .iter()
-            .filter(|object| object.kind == society_sim::WorldObjectKind::WaterSource)
-            .min_by_key(|object| resident.position.distance(object.position))
-        {
-            Action::MoveTo {
-                destination: step_toward(resident.position, water.position),
-            }
-        } else {
-            Action::Observe
-        }
-    } else if resident.hunger >= 55 {
-        if let Some(food) = village
-            .world_objects()
-            .iter()
-            .filter(|object| {
-                matches!(
-                    object.kind,
-                    society_sim::WorldObjectKind::BerryBush
-                        | society_sim::WorldObjectKind::GrainPatch
-                ) && object.quantity > 0
-            })
-            .min_by_key(|object| resident.position.distance(object.position))
-        {
-            if resident.position.distance(food.position) <= 1 {
-                Action::Gather {
-                    target: food.id,
-                    amount: 1,
-                }
-            } else {
-                Action::MoveTo {
-                    destination: step_toward(resident.position, food.position),
-                }
-            }
-        } else {
-            Action::Observe
-        }
-    } else if resident.energy < 35 {
-        Action::Rest { duration: 1 }
-    } else {
-        Action::Observe
-    }
-}
-
-fn step_toward(
-    current: society_domain::Position,
-    target: society_domain::Position,
-) -> society_domain::Position {
-    let step = |from: i32, to: i32| from + (to - from).signum() * (to - from).abs().min(12);
-    society_domain::Position::new(
-        step(current.x, target.x),
-        step(current.y, target.y),
-        step(current.z, target.z),
-    )
 }
 
 fn action_name(action: &Action) -> &'static str {

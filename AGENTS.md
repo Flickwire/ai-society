@@ -39,7 +39,8 @@ the simulator; use `docs/IMPLEMENTATION.md` for the longer-term roadmap.
   HTTP implementation. Default base URL: `http://localhost:1234/v1`.
 - `crates/society-headless/src/main.rs`: CLI commands and wiring.
   `crates/society-headless/src/agent.rs`: turn scheduling, action validation,
-  and safe fallback policy.
+  and inference failure handling (fail closed; never synthesize deterministic
+  actions when inference is enabled).
 - `crates/society-headless/src/agent/storyteller.rs`: bounded public-state and
   world-delta evidence for optional CLI narration. Story text is display-only.
 - `crates/society-headless/src/agent/perception.rs`: query/decide protocol and
@@ -101,9 +102,9 @@ boundary, even when the prompt tells the model those same rules.
 - Remote OpenAI-compatible endpoints use `--base-url` and optional bearer
   token environment variable. Non-loopback URLs require HTTPS; never put a key
   directly in a URL or commit credentials.
-- The client requests one action per resident per virtual hour. Invalid output
-  or a provider error uses deterministic fallback behavior; after the first
-  provider error, inference is disabled for the remainder of that run.
+- With `--inference`, provider errors and rejected actions stop the run; never
+  substitute deterministic actions. Truncated provider responses receive a
+  bounded retry with a larger output-token budget.
 - Residents see only their own strongest recent memories and personal attitudes
   in the decision prompt. Witness memories include uncertain interpretations;
   never treat these as canonical event history or expose another resident's

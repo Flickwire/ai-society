@@ -215,9 +215,8 @@ impl InferenceProvider for OpenAiCompatibleProvider {
     }
 
     async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, InferenceError> {
-        let url = self.endpoint("chat/completions")?;
         let model = self.selected_model().await?.to_owned();
-        let body = CompletionRequest {
+        let mut body = CompletionRequest {
             model: model.clone(),
             messages: request.messages,
             max_tokens: request.max_tokens,
@@ -225,45 +224,60 @@ impl InferenceProvider for OpenAiCompatibleProvider {
             response_format: request.response_format,
             reasoning_effort: request.reasoning_effort,
         };
-        let mut response = self
-            .with_auth(self.client.post(url).json(&body))
-            .send()
-            .await?;
-        if response.status() == StatusCode::BAD_REQUEST && body.response_format.is_some() {
-            let _ = response.bytes().await;
-            let mut compatible_body = body.clone();
-            compatible_body.response_format = None;
-            response = self
+        const MAX_ADAPTIVE_OUTPUT_TOKENS: u32 = 8_192;
+        loop {
+            let mut response = self
                 .with_auth(
                     self.client
                         .post(self.endpoint("chat/completions")?)
-                        .json(&compatible_body),
+                        .json(&body),
                 )
                 .send()
                 .await?;
+            if response.status() == StatusCode::BAD_REQUEST && body.response_format.is_some() {
+                let _ = response.bytes().await;
+                body.response_format = None;
+                response = self
+                    .with_auth(
+                        self.client
+                            .post(self.endpoint("chat/completions")?)
+                            .json(&body),
+                    )
+                    .send()
+                    .await?;
+            }
+            let response = checked_response(response).await?;
+            let response: CompletionEnvelope = response.json().await?;
+            let choice = response.choices.into_iter().next().ok_or_else(|| {
+                InferenceError::InvalidResponse("completion has no choices".to_owned())
+            })?;
+            if choice.finish_reason.as_deref() == Some("length")
+                && body.max_tokens < MAX_ADAPTIVE_OUTPUT_TOKENS
+            {
+                body.max_tokens = body
+                    .max_tokens
+                    .saturating_mul(2)
+                    .min(MAX_ADAPTIVE_OUTPUT_TOKENS);
+                continue;
+            }
+            if choice.message.content.trim().is_empty() {
+                let finish_reason = choice.finish_reason.as_deref().unwrap_or("not reported");
+                return Err(InferenceError::InvalidResponse(format!(
+                    "model `{}` returned empty assistant content after an output budget of {} tokens (finish reason: {finish_reason}); check the model's LM Studio load configuration",
+                    model, body.max_tokens
+                )));
+            }
+            return Ok(ChatResponse {
+                content: choice.message.content,
+                model: response.model,
+                prompt_tokens: response
+                    .usage
+                    .as_ref()
+                    .and_then(|usage| usage.prompt_tokens),
+                completion_tokens: response.usage.and_then(|usage| usage.completion_tokens),
+                finish_reason: choice.finish_reason,
+            });
         }
-        let response = checked_response(response).await?;
-        let response: CompletionEnvelope = response.json().await?;
-        let choice = response.choices.into_iter().next().ok_or_else(|| {
-            InferenceError::InvalidResponse("completion has no choices".to_owned())
-        })?;
-        if choice.message.content.trim().is_empty() {
-            let finish_reason = choice.finish_reason.as_deref().unwrap_or("not reported");
-            return Err(InferenceError::InvalidResponse(format!(
-                "model `{}` returned empty assistant content (finish reason: {finish_reason}); increase its output-token budget or select a model that returns a final text response",
-                model
-            )));
-        }
-        Ok(ChatResponse {
-            content: choice.message.content,
-            model: response.model,
-            prompt_tokens: response
-                .usage
-                .as_ref()
-                .and_then(|usage| usage.prompt_tokens),
-            completion_tokens: response.usage.and_then(|usage| usage.completion_tokens),
-            finish_reason: choice.finish_reason,
-        })
     }
 }
 
