@@ -53,7 +53,19 @@ async fn committed_checkpoint_survives_abrupt_process_exit() {
         .unwrap();
     assert!(status.success());
     let store = Store::open(&path).await.unwrap();
-    assert_eq!(store.load().await.unwrap().unwrap().now().0, 3);
+    let mut recovered = store.load().await.unwrap().unwrap();
+    let mut expected = Village::new();
+    expected.run_for(3).unwrap();
+    assert_eq!(
+        serde_json::to_value(expected.snapshot()).unwrap(),
+        serde_json::to_value(recovered.snapshot()).unwrap()
+    );
+    expected.run_for(3).unwrap();
+    recovered.run_for(3).unwrap();
+    assert_eq!(
+        serde_json::to_value(expected.snapshot()).unwrap(),
+        serde_json::to_value(recovered.snapshot()).unwrap()
+    );
     drop(store);
     std::fs::remove_file(path).unwrap();
 }

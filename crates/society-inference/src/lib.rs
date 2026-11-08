@@ -198,6 +198,8 @@ fn is_loopback_host(host: Option<&str>) -> bool {
     match host {
         Some("localhost") => true,
         Some(host) => host
+            .trim_start_matches('[')
+            .trim_end_matches(']')
             .parse::<std::net::IpAddr>()
             .is_ok_and(|address| address.is_loopback()),
         None => false,

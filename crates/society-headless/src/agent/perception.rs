@@ -369,3 +369,35 @@ fn explicit_display_id(label: &str) -> Option<u64> {
         .collect::<String>();
     digits.parse().ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{InferenceTurn, explicit_display_id, parse_turn};
+    use society_domain::{Action, WorldObjectId};
+
+    #[test]
+    fn parses_fenced_action_and_explicit_object_id() {
+        let turn = parse_turn(
+            "```json\n{\"action\":{\"kind\":\"gather\",\"target\":\"Tree #42\",\"amount\":1}}\n```",
+        )
+        .unwrap();
+        assert!(matches!(
+            turn,
+            InferenceTurn::Action {
+                action: Action::Gather {
+                    target: WorldObjectId(42),
+                    amount: 1
+                }
+            }
+        ));
+    }
+
+    #[test]
+    fn rejects_ambiguous_ids_and_bad_responses() {
+        assert_eq!(explicit_display_id("tree"), None);
+        assert_eq!(explicit_display_id("#42 oak"), Some(42));
+        assert!(parse_turn("").is_err());
+        assert!(parse_turn("not json").is_err());
+        assert!(parse_turn("{\"type\":\"action\",\"action\":{\"type\":\"gather\",\"target\":\"tree\",\"amount\":1}}").is_err());
+    }
+}

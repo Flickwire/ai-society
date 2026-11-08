@@ -219,3 +219,37 @@ fn normalize_question(question: &mut StateQuestion) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{QueryInput, StateQuestion, normalize_questions};
+
+    #[test]
+    fn query_bounds_and_deduplication_are_enforced() {
+        let mut input = vec![
+            QueryInput::Structured(StateQuestion::NearbyObjects {
+                radius: 255,
+                limit: 255,
+            }),
+            QueryInput::Structured(StateQuestion::NearbyObjects {
+                radius: 16,
+                limit: 8,
+            }),
+        ];
+        let normalized = normalize_questions(&mut input).unwrap();
+        assert_eq!(normalized.len(), 1);
+        assert!(matches!(
+            normalized[0],
+            StateQuestion::NearbyObjects {
+                radius: 16,
+                limit: 8
+            }
+        ));
+    }
+
+    #[test]
+    fn unstructured_input_is_rejected() {
+        let mut input = vec![QueryInput::Other(serde_json::json!("what do I see?"))];
+        assert!(normalize_questions(&mut input).is_err());
+    }
+}
